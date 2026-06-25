@@ -1,0 +1,2153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>SANS LAB · Life OS</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
+<script>
+// ── Supabase config ──────────────────────────────────────────────
+const SB_URL = 'https://cbfztoaeyvepxnwvayyk.supabase.co';
+const SB_KEY = 'sb_publishable_Rnhs6OvSqHsQsn14nsRekg_ouO-32fl';
+const SB_H   = {'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json'};
+
+async function sbGet(table, params=''){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}?${params}`, {headers:SB_H});
+  return r.ok ? r.json() : [];
+}
+async function sbPost(table, data){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}`, {method:'POST', headers:{...SB_H,'Prefer':'return=representation'}, body:JSON.stringify(data)});
+  return r.ok;
+}
+
+// ── Load real data ───────────────────────────────────────────────
+async function loadRealData(){
+  try {
+    const today = new Date().toISOString().split('T')[0];
+
+    // ── ФИНАНСЫ (все записи, без привязки к месяцу) ──
+    const fins = await sbGet('finances', 'order=date.desc');
+    const num = x => Number(x)||0;
+    const income  = fins.filter(f=>f.type==='income').reduce((a,b)=>a+num(b.amount),0);
+    const expense = fins.filter(f=>f.type==='expense').reduce((a,b)=>a+num(b.amount),0);
+    const profit  = income - expense;
+
+    updateEl('dash-income',  '+₽'+income.toLocaleString('ru'));
+    updateEl('dash-expense', '-₽'+expense.toLocaleString('ru'));
+    updateEl('dash-profit',  '₽'+profit.toLocaleString('ru'));
+
+    // Списки последних доходов/расходов
+    const incomes  = fins.filter(f=>f.type==='income').slice(0,6);
+    const expenses = fins.filter(f=>f.type==='expense').slice(0,6);
+    const incList = document.getElementById('inc-list');
+    const expList = document.getElementById('exp-list');
+    const fmtRow = (f,sign,color)=>`<div class="row"><div><div style="font-size:13px">${f.category||(sign==='+'?'Доход':'Расход')}</div><div style="font-size:11px;color:var(--text3)">${(f.date||'').slice(0,10)}${f.comment?' · '+f.comment:''}</div></div><span style="font-weight:600;color:${color}">${sign}₽${num(f.amount).toLocaleString('ru')}</span></div>`;
+    if(incList) incList.innerHTML = incomes.length ? incomes.map(f=>fmtRow(f,'+','#4ade80')).join('') : '<div style="font-size:12px;color:var(--text3);text-align:center;padding:14px 0">Нет доходов</div>';
+    if(expList) expList.innerHTML = expenses.length ? expenses.map(f=>fmtRow(f,'-','#f87171')).join('') : '<div style="font-size:12px;color:var(--text3);text-align:center;padding:14px 0">Нет расходов</div>';
+
+    // ── КОПИЛКА (цель 3): сумма всех записей-копилки из базы ──
+    if(typeof sgData==='object'){
+      const piggy = fins.filter(f=>
+        (f.comment && f.comment.indexOf('Копилка')!==-1) ||
+        (f.category && sgData.goal3Name && f.category.indexOf(sgData.goal3Name.replace(/[^\wа-яА-Я ]/g,'').trim())!==-1)
+      ).reduce((a,b)=>a+num(b.amount),0);
+      sgData.goal3MoneySaved = piggy;
+      if(typeof renderSeasonGoals==='function'){ try{renderSeasonGoals();}catch(e){} }
+    }
+
+    // ── ВЕС ──
+    const weights = await sbGet('weight_log', 'order=date.desc&limit=1');
+    if(weights.length){
+      const w = num(weights[0].weight);
+      updateEl('wm-current', w+' кг');
+      updateEl('wm-left', '+'+(80-w).toFixed(1)+' кг');
+      if(typeof renderWeightGoal==='function' && typeof weightData==='object'){
+        weightData.current=w; try{renderWeightGoal();}catch(e){}
+      }
+    }
+
+    // ── ЗАДАЧИ ──
+    const tasks = await sbGet('tasks', 'status=eq.todo&order=date.desc&limit=10');
+    const taskBox = document.getElementById('dash-tasks');
+    if(taskBox){
+      taskBox.innerHTML = tasks.length ? tasks.map(t=>`
+        <div class="row" onclick="tog2(this)" style="cursor:pointer">
+          <div style="display:flex;align-items:center;gap:9px">
+            <div class="tcheck"></div>
+            <span style="font-size:13px">${t.text||''}</span>
+          </div>
+          <span class="badge" style="background:var(--orange-bg);color:var(--orange-tc)">${t.priority||'todo'}</span>
+        </div>`).join('') : '<div style="font-size:13px;color:var(--text3);text-align:center;padding:20px 0">Нет активных задач</div>';
+    }
+
+    // ── ПРИВЫЧКИ СЕГОДНЯ ──
+    const habits = await sbGet('habits_log', `date=eq.${today}`);
+    updateEl('dash-habits-count', habits.length+' привычек');
+
+    console.log('✅ Данные загружены из Supabase. Записей финансов:', fins.length, '| Доход:', income, '| Расход:', expense, '| Прибыль:', profit);
+  } catch(e){
+    console.warn('Supabase недоступен:', e);
+  }
+}
+
+function updateEl(id, val){
+  const el = document.getElementById(id);
+  if(el) el.textContent = val;
+}
+
+// Запуск после загрузки страницы
+window.addEventListener('load', ()=>setTimeout(loadRealData, 400));
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --orange:#E8500A;--orange-bg:#FAECE7;--orange-tc:#712B13;
+  --bg:#0f0f0f;--bg2:#1a1a1a;--bg3:#222;--bg4:#2a2a2a;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
+  --text:#f0f0f0;--text2:#a0a0a0;--text3:#606060;
+  --card:#1c1c1c;--sidebar:#161616;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+.app{display:flex;height:100vh;overflow:hidden}
+
+/* SIDEBAR */
+.sidebar{width:210px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.logo-block{padding:16px 14px 14px;border-bottom:1px solid var(--border)}
+.logo-row{display:flex;align-items:center;gap:10px}
+.logo-title{font-size:14px;font-weight:600;color:var(--orange);letter-spacing:.03em}
+.logo-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.nav-sec{font-size:9px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;padding:12px 14px 4px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 14px;font-size:12px;color:var(--text2);cursor:pointer;transition:all .12s;border-right:2px solid transparent;user-select:none}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{background:var(--bg3);color:var(--orange);border-right-color:var(--orange);font-weight:500}
+.nav-item i{font-size:16px}
+
+/* MAIN */
+.main{flex:1;overflow-y:auto;padding:24px;background:var(--bg)}
+.page{display:none}
+.page.active{display:block}
+
+/* GRID */
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+
+/* METRIC CARDS */
+.mc{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px}
+.ml{font-size:11px;color:var(--text2);margin-bottom:4px}
+.mv{font-size:22px;font-weight:600;line-height:1.2}
+.ms{font-size:10px;color:var(--text3);margin-top:3px}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+.ct{font-size:13px;font-weight:500;margin-bottom:12px;color:var(--text)}
+
+/* PAGE HEADER */
+.ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.pt{font-size:20px;font-weight:600}
+
+/* BADGE */
+.badge{display:inline-flex;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--text);transition:all .12s;font-family:inherit}
+.btn:hover{background:var(--bg3)}
+.btn-p{background:var(--orange);color:#fff;border-color:var(--orange)}
+.btn-p:hover{background:#c94008}
+
+/* ROWS */
+.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+
+/* XP BAR */
+.xpt{height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;border:1px solid var(--border)}
+.xpf{height:100%;border-radius:4px;background:var(--orange)}
+
+/* PROGRESS BAR */
+.pbar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:6px 0}
+.pfill{height:100%;border-radius:3px}
+
+/* TASK CHECK */
+.tcheck{width:17px;height:17px;border-radius:4px;border:1.5px solid var(--border2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s}
+.tcheck.done{background:var(--orange);border-color:var(--orange)}
+.tcheck.done::after{content:'✓';font-size:10px;color:#fff;font-weight:700}
+
+/* FORMS */
+.form-hidden{display:none}
+.form-show{display:block;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px}
+.fi{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--text);font-size:12px;font-family:inherit;margin-bottom:8px;outline:none}
+.fi:focus{border-color:var(--orange)}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.frow input,.frow select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--text);font-size:12px;font-family:inherit;outline:none}
+.frow input:focus,.frow select:focus{border-color:var(--orange)}
+.frow select option{background:var(--bg2)}
+
+/* AI CHAT */
+.ai-msg{padding:10px 13px;border-radius:10px;font-size:13px;line-height:1.65;margin-bottom:8px}
+.ai-a{background:var(--bg3);color:var(--text)}
+.ai-u{background:var(--orange-bg);color:var(--orange-tc)}
+.chat-box{max-height:400px;overflow-y:auto;margin-bottom:12px}
+.ci{flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-size:13px;font-family:inherit;outline:none}
+.ci:focus{border-color:var(--orange)}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* STATS */
+.srow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sname{font-size:12px;color:var(--text2);width:95px;flex-shrink:0}
+.sbar{flex:1;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.sfill{height:100%;border-radius:3px}
+.sval{font-size:12px;font-weight:500;width:24px;text-align:right;flex-shrink:0}
+
+/* TIMELINE */
+.tl{display:flex;justify-content:space-between;align-items:flex-end;padding:14px 0 6px;position:relative}
+.tl::before{content:'';position:absolute;left:0;right:0;top:46%;height:1px;background:var(--border)}
+.ts{display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1;cursor:pointer}
+.td{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;transition:all .2s;border:1.5px solid var(--border)}
+.ts.active .td{width:36px;height:36px;font-size:13px}
+.tlab{font-size:10px;color:var(--text3);text-align:center;max-width:56px}
+
+/* HABITS */
+.h-dot{width:20px;height:20px;border-radius:50%;border:1px solid var(--border)}
+
+/* ========== MOBILE ========== */
+@media(max-width:768px){
+  /* Layout */
+  .app{flex-direction:column;height:100dvh}
+  .main{padding:14px 12px 80px;overflow-y:auto;flex:1}
+
+  /* Sidebar → bottom nav */
+  .sidebar{
+    width:100%;height:60px;flex-shrink:0;
+    flex-direction:row;overflow:hidden;overflow-x:auto;
+    border-right:none;border-top:1px solid var(--border);
+    order:2;padding:0;
+  }
+  .logo-block,.nav-sec{display:none}
+  .nav-item{
+    flex-direction:column;gap:3px;padding:8px 10px;
+    font-size:9px;min-width:56px;text-align:center;
+    border-right:none;border-top:2px solid transparent;
+    white-space:nowrap;flex-shrink:0;
+  }
+  .nav-item i{font-size:20px}
+  .nav-item.active{border-top-color:var(--orange);border-right-color:transparent;background:var(--bg3)}
+
+  /* Grids → 1 or 2 col */
+  .g4{grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .g3{grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .g2{grid-template-columns:1fr;gap:10px;margin-bottom:10px}
+
+  /* Cards */
+  .card{padding:12px;margin-bottom:10px}
+  .mc{padding:10px}
+  .mv{font-size:18px}
+
+  /* Hero block */
+  #page-dashboard > div:first-child{flex-direction:column;align-items:center;text-align:center;padding:16px}
+  #page-dashboard > div:first-child > div:first-child{margin-bottom:12px}
+  #av-small{width:100px;height:105px}
+
+  /* Stat cards in hero — 3 col on mobile */
+  #page-dashboard > div:first-child div[style*="repeat(5,1fr)"]{
+    grid-template-columns:repeat(3,1fr)!important;
+  }
+
+  /* Season goals — 1 col */
+  div[style*="grid-template-columns:1fr 1fr 1fr"]{
+    grid-template-columns:1fr!important;
+  }
+
+  /* Finance 3-col */
+  div[style*="grid-template-columns:1fr 1fr 1fr"]{
+    grid-template-columns:1fr!important;
+  }
+
+  /* Habits tracker — hide day columns on very small, shrink */
+  #habits-track div[style*="width:175px"]{width:120px!important;font-size:11px!important}
+  #habits-track div[style*="width:50px"]{width:36px!important;font-size:10px!important}
+  #habits-track div[style*="width:38px"]{width:30px!important}
+  #habits-track div[style*="width:28px"]{width:22px!important}
+  #habits-track div[style*="width:26px"]{width:22px!important;height:22px!important}
+
+  /* Page header */
+  .ph{margin-bottom:14px}
+  .pt{font-size:17px}
+
+  /* Donut charts */
+  div[style*="width:150px;height:150px"]{width:120px!important;height:120px!important}
+
+  /* Forms */
+  .frow{grid-template-columns:1fr!important}
+
+  /* XP bar text */
+  div[style*="position:absolute;right:8px"]{display:none}
+
+  /* Timeline labels */
+  .tlab{font-size:9px;max-width:40px}
+  .td{width:24px;height:24px;font-size:10px}
+  .ts.active .td{width:28px;height:28px}
+}
+
+@media(max-width:380px){
+  .g4{grid-template-columns:1fr 1fr}
+  .main{padding:10px 10px 76px}
+  .nav-item{min-width:48px;padding:6px 8px;font-size:8px}
+  .nav-item i{font-size:18px}
+}
+
+/* ── Анти-переполнение по горизонтали (чинит "зум"/обрезание текста на телефоне) ── */
+*{box-sizing:border-box}
+html,body{max-width:100%;overflow-x:hidden}
+.app{max-width:100vw;overflow-x:hidden}
+.main{max-width:100%;min-width:0}
+.card,.page{max-width:100%;min-width:0}
+.row{min-width:0}
+.row span{overflow-wrap:anywhere;word-break:break-word}
+img,svg{max-width:100%;height:auto}
+@media(max-width:768px){
+  /* Имя героя не обрезаем — даём перенос и уменьшаем при необходимости */
+  #page-dashboard span[style*="font-size:30px"]{font-size:22px!important;white-space:normal!important;overflow-wrap:anywhere}
+  /* Подписи характеристик не режем */
+  #page-dashboard div[style*="repeat(5,1fr)"] > div{min-width:0;padding:6px 4px!important}
+  #page-dashboard div[style*="repeat(5,1fr)"] div[style*="font-size:10px"]{font-size:9px!important;white-space:normal!important;line-height:1.1}
+  /* Любые широкие гриды в 3 колонки — в 1 на мобиле */
+  div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important}
+  /* Горизонтальные таблицы/трекеры можно скроллить, а не ломать макет */
+  #habits-track{overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div class="logo-block">
+    <div class="logo-row">
+      <svg width="32" height="32" viewBox="0 0 220 230" xmlns="http://www.w3.org/2000/svg" id="nav-lion"></svg>
+      <div>
+        <div class="logo-title">SANS LAB</div>
+        <div class="logo-sub">Life OS · Ур. 12</div>
+      </div>
+    </div>
+  </div>
+  <div class="nav-sec">Главное</div>
+  <div class="nav-item active" onclick="go('dashboard')"><i class="ti ti-layout-dashboard"></i>Дашборд</div>
+  <div class="nav-item" onclick="go('character')"><i class="ti ti-shield-star"></i>Персонаж</div>
+  <div class="nav-sec">Финансы</div>
+  <div class="nav-item" onclick="go('finance')"><i class="ti ti-chart-pie"></i>Финансы</div>
+  <div class="nav-sec">Жизнь</div>
+  <div class="nav-item" onclick="go('habits')"><i class="ti ti-calendar-check"></i>Привычки</div>
+  <div class="nav-item" onclick="go('tasks')"><i class="ti ti-checklist"></i>Задачи</div>
+  <div class="nav-item" onclick="go('health')"><i class="ti ti-barbell"></i>Здоровье</div>
+  <div class="nav-sec">Бизнес</div>
+  <div class="nav-item" onclick="go('business')"><i class="ti ti-building-store"></i>Бизнес</div>
+  <div class="nav-sec">AI</div>
+  <div class="nav-item" onclick="go('ai')"><i class="ti ti-robot"></i>AI-ассистент</div>
+  <div class="nav-item" onclick="go('notes')"><i class="ti ti-bulb"></i>Идеи</div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+<!-- DASHBOARD -->
+<div id="page-dashboard" class="page active">
+
+  <!-- 1. ГЕРОЙ -->
+  <div style="background:var(--card);border:1px solid rgba(232,80,10,0.35);border-radius:16px;padding:22px;margin-bottom:16px">
+    <div style="display:flex;gap:24px;align-items:flex-start">
+      <div style="flex-shrink:0;text-align:center">
+        <svg width="130" height="137" viewBox="0 0 220 230" xmlns="http://www.w3.org/2000/svg" id="av-small"></svg>
+        <span style="background:var(--orange-bg);color:var(--orange-tc);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;margin-top:6px;display:inline-block">НОВИЧОК</span>
+      </div>
+      <div style="flex:1;min-width:0;padding-top:4px">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:3px">
+          <span style="font-size:30px;font-weight:800;letter-spacing:-.01em">Andreevich</span>
+          <span style="font-size:13px;color:var(--text2)">Уровень 1</span>
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:16px" id="dt">Предприниматель · Новичок · SANS LAB</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:5px">
+          <span>Опыт персонажа</span>
+          <span style="color:var(--orange);font-weight:600">0 / 500 XP · до Ур. 2</span>
+        </div>
+        <div style="height:14px;background:var(--bg3);border-radius:7px;overflow:hidden;border:1px solid var(--border);margin-bottom:20px;position:relative">
+          <div style="height:100%;width:0%;background:linear-gradient(90deg,#E8500A,#fb923c);border-radius:7px"></div>
+          <div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:9px;color:rgba(255,255,255,0.4)">осталось 500 XP</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+          <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;border:1px solid rgba(248,113,113,0.2)">
+            <div style="font-size:20px;font-weight:800;color:#f87171;line-height:1">0</div>
+            <div style="font-size:9px;color:var(--text3);margin:2px 0">/ 100</div>
+            <div style="font-size:10px;color:var(--text2)">⚔ Сила</div>
+            <div style="font-size:11px;font-weight:700;color:#f87171;margin-top:3px;background:rgba(248,113,113,0.15);border-radius:4px;padding:1px 0">F</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;border:1px solid rgba(167,139,250,0.2)">
+            <div style="font-size:20px;font-weight:800;color:#a78bfa;line-height:1">0</div>
+            <div style="font-size:9px;color:var(--text3);margin:2px 0">/ 100</div>
+            <div style="font-size:10px;color:var(--text2)">🧠 Интеллект</div>
+            <div style="font-size:11px;font-weight:700;color:#a78bfa;margin-top:3px;background:rgba(167,139,250,0.15);border-radius:4px;padding:1px 0">C</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;border:1px solid rgba(74,222,128,0.2)">
+            <div style="font-size:20px;font-weight:800;color:#4ade80;line-height:1">0</div>
+            <div style="font-size:9px;color:var(--text3);margin:2px 0">/ 100</div>
+            <div style="font-size:10px;color:var(--text2)">💰 Финансы</div>
+            <div style="font-size:11px;font-weight:700;color:#4ade80;margin-top:3px;background:rgba(74,222,128,0.15);border-radius:4px;padding:1px 0">D+</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;border:1px solid rgba(52,211,153,0.2)">
+            <div style="font-size:20px;font-weight:800;color:#34d399;line-height:1">0</div>
+            <div style="font-size:9px;color:var(--text3);margin:2px 0">/ 100</div>
+            <div style="font-size:10px;color:var(--text2)">❤ Здоровье</div>
+            <div style="font-size:11px;font-weight:700;color:#34d399;margin-top:3px;background:rgba(52,211,153,0.15);border-radius:4px;padding:1px 0">B-</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;border:1px solid rgba(232,80,10,0.3)">
+            <div style="font-size:20px;font-weight:800;color:var(--orange);line-height:1">0</div>
+            <div style="font-size:9px;color:var(--text3);margin:2px 0">/ 100</div>
+            <div style="font-size:10px;color:var(--text2)">🔥 Дисциплина</div>
+            <div style="font-size:11px;font-weight:700;color:var(--orange);margin-top:3px;background:rgba(232,80,10,0.15);border-radius:4px;padding:1px 0">B</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. СЕГОДНЯ + СЕРИИ -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">⚔ Сегодня</div>
+      <div id="dash-tasks">
+        <div style="font-size:13px;color:var(--text3);text-align:center;padding:20px 0">Задачи загружаются из Supabase...</div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:5px">
+          <span>Прогресс дня</span>
+          <span id="day-pct-label" style="color:var(--orange);font-weight:600">40%</span>
+        </div>
+        <div style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+          <div id="day-pct-bar" style="height:100%;width:40%;background:linear-gradient(90deg,#E8500A,#fb923c);border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">🔥 Серии дней</div>
+      <div id="dash-habits-streaks"></div>
+    </div>
+
+  </div>
+
+  <!-- 3. ЦЕЛИ СЕЗОНА -->
+  <div class="card" style="margin-bottom:16px;border-color:rgba(251,146,60,0.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin-bottom:0">🎯 Цели сезона</div>
+      <button class="btn" style="font-size:11px;padding:4px 10px" onclick="tf('season-goals-editor')">✏️ Редактировать</button>
+    </div>
+
+    <!-- Форма редактирования целей -->
+    <div id="season-goals-editor" class="form-hidden" style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:10px">Редактировать цели сезона</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">⚖ Текущий вес, кг</div>
+          <input type="number" step="0.01" id="sg-weight-cur" placeholder="68.85" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">⚖ Цель по весу, кг</div>
+          <input type="number" step="0.1" id="sg-weight-goal" placeholder="80" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">💰 Текущий капитал, ₽</div>
+          <input type="number" id="sg-capital-cur" placeholder="0" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">💰 Цель по капиталу, ₽</div>
+          <input type="number" id="sg-capital-goal" placeholder="1500000" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">✈ Название 3-й цели</div>
+          <input type="text" id="sg-goal3-name" placeholder="Япония" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">✈ Дней до цели</div>
+          <input type="number" id="sg-goal3-days" placeholder="127" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">✈ Цель по деньгам, ₽</div>
+          <input type="number" id="sg-goal3-money-goal" placeholder="100000" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">✈ Уже накоплено, ₽</div>
+          <input type="number" id="sg-goal3-money-saved" placeholder="0" style="width:100%;padding:7px 10px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:inherit">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" onclick="saveSeasonGoals()">Сохранить</button>
+        <button class="btn" onclick="tf('season-goals-editor')">Отмена</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+      <!-- Вес -->
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;border:1px solid rgba(52,211,153,0.2)">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">⚖ Вес</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-bottom:8px">
+          <span style="font-size:28px;font-weight:800;color:#34d399;line-height:1" id="sg-disp-weight-cur">68.85</span>
+          <span style="font-size:13px;color:var(--text3)">/ <span id="sg-disp-weight-goal">80</span> кг</span>
+        </div>
+        <div style="height:8px;background:var(--bg2);border-radius:4px;overflow:hidden;margin-bottom:8px">
+          <div id="sg-bar-weight" style="height:100%;background:#34d399;border-radius:4px;transition:width .4s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">До цели: <b style="color:var(--text)" id="sg-disp-weight-left">11.15 кг</b></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px" id="sg-disp-weight-eta">~окт 2026</div>
+      </div>
+      <!-- Капитал -->
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;border:1px solid rgba(74,222,128,0.2)">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">💰 Капитал</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-bottom:8px">
+          <span style="font-size:28px;font-weight:800;color:#4ade80;line-height:1" id="sg-disp-capital-cur">0</span>
+          <span style="font-size:13px;color:var(--text3)">/ <span id="sg-disp-capital-goal">1 500к</span> ₽</span>
+        </div>
+        <div style="height:8px;background:var(--bg2);border-radius:4px;overflow:hidden;margin-bottom:8px">
+          <div id="sg-bar-capital" style="width:0%;height:100%;background:#4ade80;border-radius:4px;transition:width .4s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">До цели: <b style="color:var(--text)" id="sg-disp-capital-left">₽1 500 000</b></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px" id="sg-disp-capital-eta">~считается</div>
+      </div>
+      <!-- Цель 3 — копилка -->
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;border:1px solid rgba(96,165,250,0.2)">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em" id="sg-disp-goal3-name">✈ Япония</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-bottom:4px">
+          <span style="font-size:24px;font-weight:800;color:#60a5fa;line-height:1" id="sg-disp-goal3-saved">₽0</span>
+          <span style="font-size:12px;color:var(--text3)">/ <span id="sg-disp-goal3-goal">₽0</span></span>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px"><span id="sg-disp-goal3-days">0</span> дней до цели</div>
+        <div style="height:8px;background:var(--bg2);border-radius:4px;overflow:hidden;margin-bottom:10px">
+          <div id="sg-bar-goal3" style="width:0%;height:100%;background:#60a5fa;border-radius:4px;transition:width .4s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px" id="sg-disp-goal3-sub">Осталось собрать: <b style="color:var(--text)" id="sg-disp-goal3-left">₽0</b></div>
+        <!-- Добавить деньги -->
+        <div style="display:flex;gap:6px">
+          <input type="number" id="sg-goal3-add-amount" placeholder="₽" style="flex:1;padding:6px 8px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:12px;font-family:inherit;min-width:0">
+          <button class="btn btn-p" style="font-size:11px;padding:6px 10px;flex-shrink:0" onclick="addToGoal3()">+ Добавить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 4. AI СВОДКА -->
+  <div class="card" style="margin-bottom:0">
+    <div class="ct">🤖 AI-сводка дня</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div style="background:#14532d22;border:1px solid #14532d55;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:#4ade80;margin-bottom:8px">🟢 Что хорошо</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.9">45 дней без сигарет<br>90% тренировок<br>Прибыль — рекорд</div>
+      </div>
+      <div style="background:#451a0322;border:1px solid #451a0355;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:#fb923c;margin-bottom:8px">🟡 Внимание</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.9">Еда +34% нормы<br>Сон — только 3/7<br>2 задачи зависли</div>
+      </div>
+      <div style="background:#450a0a22;border:1px solid #450a0a66;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:#f87171;margin-bottom:8px">🔴 Риск</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.9">Квартира через 7 дн<br>Не хватает ₽12 000<br>Вес стоит 5 дней</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- CHARACTER -->
+<div id="page-character" class="page">
+  <div class="ph">
+    <div class="pt">Профиль персонажа</div>
+    <span class="badge" style="background:var(--orange-bg);color:var(--orange-tc)">Ур.1 · 0 XP</span>
+  </div>
+  <div class="g2">
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+        <svg id="char-av" width="100" height="105" viewBox="0 0 220 230" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700;margin-bottom:2px">Андреевич</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Предприниматель · Новичок</div>
+          <div style="font-size:11px;color:var(--text2);display:flex;justify-content:space-between;margin-bottom:4px">
+            <span>0 XP</span><span style="color:var(--orange)">До Ур.2: 500 XP</span>
+          </div>
+          <div class="xpt"><div class="xpf" style="width:86%"></div></div>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px">Следующий ранг: Ученик · Награда: первый значок</div>
+        </div>
+      </div>
+      <!-- Достижения — одна строка иконок -->
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        <span class="badge" style="background:#451a0333;color:#fb923c" title="Первые шаги">🏆 Первые шаги</span>
+        <span class="badge" style="background:#450a0a33;color:#f87171" title="45 дней подряд">🔥 45 дн</span>
+        <span class="badge" style="background:#14532d33;color:#4ade80" title="Книжный лев">📚 21 день</span>
+        <span class="badge" style="background:#1e3a5f33;color:#60a5fa" title="100 тренировок">💪 100</span>
+        <span class="badge" style="background:#2e1065aa;color:#a78bfa" title="30 дней без сигарет">🚭 30 дн</span>
+        <span class="badge" style="background:var(--orange-bg);color:var(--orange-tc)" title="Первый миллион">💰 Млн</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ct">Характеристики</div>
+      <div id="char-stats"></div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="card" style="margin-bottom:0"><div class="ct">⚔ Ежедневные задания</div><div id="char-daily"></div></div>
+    <div class="card" style="margin-bottom:0"><div class="ct">📅 Недельные задания</div><div id="char-weekly"></div></div>
+  </div>
+</div>
+
+<!-- FINANCE -->
+<div id="page-finance" class="page">
+  <div class="ph">
+    <div class="pt">Финансы</div>
+    <button class="btn btn-p" onclick="tf('fin-form')"><i class="ti ti-plus"></i> Добавить</button>
+  </div>
+  <div id="fin-form" class="form-hidden">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn" id="fi-inc" onclick="setFT('inc')" style="background:#14532d33;color:#4ade80">Доход</button>
+      <button class="btn" id="fi-exp" onclick="setFT('exp')">Расход</button>
+    </div>
+    <div class="frow"><input type="number" placeholder="Сумма ₽" id="fi-amt"><select id="fi-cat"><option>Продажи</option><option>Работа</option><option>Бизнес</option><option>Еда</option><option>Квартира</option><option>Зал</option><option>Одежда</option><option>Прочее</option></select></div>
+    <div class="frow"><input type="date" id="fi-date"><input type="text" placeholder="Комментарий" id="fi-cmt"></div>
+    <button class="btn btn-p" onclick="addFin()">Сохранить</button>
+  </div>
+
+  <!-- 1. КАПИТАЛ — главная карточка -->
+  <div style="background:linear-gradient(135deg,rgba(232,80,10,0.15),rgba(74,222,128,0.08));border:1px solid rgba(232,80,10,0.3);border-radius:14px;padding:20px;margin-bottom:14px;display:flex;align-items:center;gap:24px">
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">💰 Чистый капитал</div>
+      <div style="font-size:42px;font-weight:900;color:#4ade80;line-height:1;margin-bottom:6px">₽0</div>
+      <div style="font-size:13px;color:#34d399">↑ +₽0 за месяц</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:170px">
+      <div style="display:flex;justify-content:space-between;font-size:12px">
+        <span style="color:var(--text3)">💵 Наличные</span>
+        <span style="color:#4ade80;font-weight:600">₽0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px">
+        <span style="color:var(--text3)">👟 Товар</span>
+        <span style="color:#fb923c;font-weight:600">₽0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px">
+        <span style="color:var(--text3)">₿ Крипта</span>
+        <span style="color:#fbbf24;font-weight:600">₽0</span>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:6px;display:flex;justify-content:space-between;font-size:11px">
+        <span style="color:var(--text3)">До ₽1.5 млн</span>
+        <span style="color:var(--orange);font-weight:600">14.3%</span>
+      </div>
+      <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">
+        <div style="width:0%;height:100%;background:#4ade80;border-radius:3px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. МЕСЯЦ + КВАРТИРА + ПРОГНОЗ -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+
+    <!-- Доход/расход/прибыль -->
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">📊 Финансы</div>
+      <div class="row">
+        <span style="color:var(--text2);font-size:13px">Доход</span>
+        <span id="dash-income" style="font-weight:700;color:#4ade80">+₽0</span>
+      </div>
+      <div class="row">
+        <span style="color:var(--text2);font-size:13px">Расход</span>
+        <span id="dash-expense" style="font-weight:700;color:#f87171">-₽0</span>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:12px;color:var(--text2)">Прибыль</span>
+        <span id="dash-profit" style="font-size:20px;font-weight:800;color:#34d399">₽0</span>
+      </div>
+    </div>
+
+    <!-- Квартира -->
+    <div class="card" style="margin-bottom:0;border-color:rgba(248,113,113,0.25)">
+      <div class="ct">🏠 Аренда квартиры</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Платёж 28-го числа</div>
+      <div style="font-size:28px;font-weight:800;color:#f87171;line-height:1;margin-bottom:10px">₽0</div>
+      <div style="margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:4px">
+          <span>Накоплено</span><span style="color:#4ade80;font-weight:600">₽0</span>
+        </div>
+        <div style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+          <div style="width:0%;height:100%;background:#4ade80;border-radius:4px"></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding-top:6px;border-top:1px solid var(--border)">
+        <span style="color:var(--text3)">Осталось собрать</span>
+        <span style="color:#f87171;font-weight:700">₽0</span>
+      </div>
+    </div>
+
+    <!-- Прогноз -->
+    <div class="card" style="margin-bottom:0;border-color:rgba(96,165,250,0.25)">
+      <div class="ct">📈 Прогноз месяца</div>
+      <div class="row">
+        <span style="color:var(--text2);font-size:13px">Доход</span>
+        <span style="font-weight:600;color:#4ade80">₽0</span>
+      </div>
+      <div class="row">
+        <span style="color:var(--text2);font-size:13px">Расход</span>
+        <span style="font-weight:600;color:#f87171">₽0</span>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:12px;color:var(--text2)">Остаток</span>
+        <span style="font-size:20px;font-weight:800;color:#60a5fa">₽0</span>
+      </div>
+    </div>
+
+  </div>
+
+
+  <!-- 3. КРУГОВЫЕ ДИАГРАММЫ -->
+  <div class="g2" style="margin-bottom:14px">
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Доходы по источникам</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div style="position:relative;width:150px;height:150px;flex-shrink:0">
+          <canvas id="inc-donut"></canvas>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+            <div style="font-size:17px;font-weight:700;color:#4ade80">₽62к</div>
+            <div style="font-size:10px;color:var(--text3)">доход</div>
+          </div>
+        </div>
+        <div style="flex:1" id="inc-legend"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Расходы по категориям</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div style="position:relative;width:150px;height:150px;flex-shrink:0">
+          <canvas id="exp-donut"></canvas>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+            <div style="font-size:17px;font-weight:700;color:#f87171">₽28к</div>
+            <div style="font-size:10px;color:var(--text3)">расход</div>
+          </div>
+        </div>
+        <div style="flex:1" id="exp-legend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. ОБЯЗАТЕЛЬНЫЕ РАСХОДЫ + ПОСЛЕДНИЕ ЗАПИСИ -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+
+    <!-- Обязательные расходы — редактируемые -->
+    <div class="card" style="margin-bottom:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin-bottom:0">📌 Обязательные расходы</div>
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openFixedEditor(null)"><i class="ti ti-plus"></i> Добавить</button>
+      </div>
+
+      <!-- Форма добавления/редактирования -->
+      <div id="fixed-editor" class="form-hidden" style="margin-bottom:10px">
+        <input type="hidden" id="fe-idx" value="-1">
+        <div class="frow" style="margin-bottom:8px">
+          <input type="text" placeholder="Название (Квартира, Зал...)" id="fe-name">
+          <input type="number" placeholder="Сумма ₽" id="fe-amount">
+        </div>
+        <div class="frow" style="margin-bottom:8px">
+          <input type="number" placeholder="День оплаты (1-31)" id="fe-day" min="1" max="31">
+          <select id="fe-icon">
+            <option value="🏠">🏠 Жильё</option>
+            <option value="💪">💪 Спорт</option>
+            <option value="🐱">🐱 Питомец</option>
+            <option value="🚗">🚗 Транспорт</option>
+            <option value="📱">📱 Связь</option>
+            <option value="💊">💊 Здоровье</option>
+            <option value="📚">📚 Учёба</option>
+            <option value="🔁">🔁 Прочее</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-p" style="font-size:12px" onclick="saveFixed()">Сохранить</button>
+          <button class="btn" style="font-size:12px" onclick="tf('fixed-editor')">Отмена</button>
+          <button class="btn" id="fe-del" style="display:none;font-size:12px;color:#f87171;border-color:rgba(248,113,113,0.3)" onclick="deleteFixed()">Удалить</button>
+        </div>
+      </div>
+
+      <div id="fixed-list"></div>
+
+      <!-- Итого -->
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:12px;color:var(--text2)">Итого в месяц</span>
+        <span id="fixed-total" style="font-size:18px;font-weight:800;color:#f87171"></span>
+      </div>
+    </div>
+
+    <!-- Последние записи -->
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">📋 Последние записи</div>
+      <div id="inc-list">
+        <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Записи появятся после первых операций 📊</div>
+      </div>
+      <div id="exp-list"></div>
+    </div>
+
+  </div>
+
+
+</div>
+
+<!-- GOALS - встроены в дашборд, страница скрыта -->
+<div id="page-goals" class="page" style="display:none!important"></div>
+
+<!-- HABITS -->
+<div id="page-habits" class="page">
+  <div class="ph"><div class="pt">Привычки</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div id="habits-stats" style="display:flex;gap:10px"></div>
+    <button class="btn btn-p" onclick="showHabitEditor(null)"><i class="ti ti-plus"></i> Привычка</button>
+  </div>
+
+  <!-- Форма добавления/редактирования -->
+  <div id="habit-editor" class="form-hidden" style="margin-bottom:14px">
+    <div style="font-size:13px;font-weight:500;margin-bottom:10px" id="habit-editor-title">Новая привычка</div>
+    <input type="hidden" id="he-idx" value="-1">
+    <div class="frow">
+      <input class="fi" style="margin-bottom:0" type="text" placeholder="Название (например: 💪 Зал)" id="he-name">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:var(--text2)">Цель: сколько раз в неделю</label>
+        <select class="fi" style="margin-bottom:0" id="he-target">
+          <option value="1">1 раз в неделю</option>
+          <option value="2">2 раза в неделю</option>
+          <option value="3" selected>3 раза в неделю</option>
+          <option value="4">4 раза в неделю</option>
+          <option value="5">5 раз в неделю</option>
+          <option value="6">6 раз в неделю</option>
+          <option value="7">7 дней (каждый день)</option>
+        </select>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+      💡 Процент 100% = выполнил цель. Если цель 3 раза, сходил 3 раза — это 100%.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-p" onclick="saveHabit()">Сохранить</button>
+      <button class="btn" onclick="tf('habit-editor')">Отмена</button>
+      <button class="btn" id="he-delete" style="display:none;color:#f87171;border-color:rgba(248,113,113,0.3)" onclick="deleteHabit()">Удалить привычку</button>
+    </div>
+  </div>
+
+  <div class="card"><div class="ct">Трекер — июнь</div><div id="habits-track"></div></div>
+</div>
+
+<!-- TASKS -->
+<div id="page-tasks" class="page">
+  <div class="ph">
+    <div class="pt">Задачи</div>
+    <button class="btn btn-p" onclick="tf('task-form')"><i class="ti ti-plus"></i> Задача</button>
+  </div>
+  <div id="task-form" class="form-hidden">
+    <div class="frow"><input type="text" placeholder="Название задачи" id="t-name"><select id="t-cat"><option>Бизнес</option><option>Финансы</option><option>Здоровье</option><option>Личное</option></select></div>
+    <div class="frow"><input type="date" id="t-date"><select id="t-pri"><option value="high">🔴 Высокий</option><option value="mid" selected>🟡 Средний</option><option value="low">🟢 Низкий</option></select></div>
+    <button class="btn btn-p" onclick="addTask()">Сохранить</button>
+  </div>
+
+  <!-- Фильтр-переключатель -->
+  <div style="display:flex;gap:6px;margin-bottom:14px;background:var(--bg2);border-radius:10px;padding:4px;border:1px solid var(--border)">
+    <button id="tf-today" onclick="switchTaskFilter('today')" style="flex:1;padding:7px;border-radius:7px;border:none;background:var(--orange);color:#fff;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit">Сегодня</button>
+    <button id="tf-week" onclick="switchTaskFilter('week')" style="flex:1;padding:7px;border-radius:7px;border:none;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit">Неделя</button>
+    <button id="tf-month" onclick="switchTaskFilter('month')" style="flex:1;padding:7px;border-radius:7px;border:none;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit">Месяц</button>
+  </div>
+
+  <!-- Сегодня -->
+  <div id="tf-panel-today">
+    <div class="card" style="margin-bottom:0">
+      <div id="tasks-today">
+        <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Задачи появятся после добавления через бота ✅</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Неделя -->
+  <div id="tf-panel-week" style="display:none">
+    <div class="card" style="margin-bottom:0">
+      <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Задачи на неделю появятся здесь 📅</div>
+    </div>
+  </div>
+
+  <!-- Месяц -->
+  <div id="tf-panel-month" style="display:none">
+    <div class="card" style="margin-bottom:0">
+      <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Задачи на месяц появятся здесь 🗓️</div>
+    </div>
+  </div>
+</div>
+
+<!-- HEALTH -->
+<div id="page-health" class="page">
+  <div class="ph">
+    <div class="pt">Здоровье и тело</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="tf('goal-weight-form')"><i class="ti ti-target"></i> Цель</button>
+      <button class="btn btn-p" onclick="tf('w-form')"><i class="ti ti-plus"></i> Записать вес</button>
+    </div>
+  </div>
+
+  <!-- Форма: записать вес -->
+  <div id="w-form" class="form-hidden">
+    <div class="frow">
+      <input type="number" step="0.1" placeholder="Вес, кг" id="w-val">
+      <input type="date" id="w-date">
+    </div>
+    <button class="btn btn-p" onclick="saveWeight()">Сохранить</button>
+  </div>
+
+  <!-- Форма: изменить цель -->
+  <div id="goal-weight-form" class="form-hidden">
+    <div style="font-size:13px;font-weight:500;margin-bottom:10px">🎯 Изменить цель по весу</div>
+    <div class="frow">
+      <div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Целевой вес, кг</div>
+        <input type="number" step="0.1" placeholder="80" id="wg-target" value="80">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Дедлайн (необязательно)</div>
+        <input type="date" id="wg-deadline">
+      </div>
+    </div>
+    <div class="frow">
+      <div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Текущий вес, кг</div>
+        <input type="number" step="0.1" placeholder="69" id="wg-current" value="68.85">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Тип цели</div>
+        <select id="wg-type" class="fi" style="margin-bottom:0">
+          <option value="gain">Набор массы ↑</option>
+          <option value="loss">Похудение ↓</option>
+          <option value="maintain">Поддержание →</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-p" onclick="saveWeightGoal()">Сохранить цель</button>
+      <button class="btn" onclick="tf('goal-weight-form')">Отмена</button>
+    </div>
+  </div>
+
+  <!-- Метрики -->
+  <div class="g4" id="weight-metrics">
+    <div class="mc"><div class="ml">Текущий вес</div><div class="mv" id="wm-current">68.85 кг</div></div>
+    <div class="mc"><div class="ml">Цель</div><div class="mv" style="color:#4ade80" id="wm-goal">80 кг</div></div>
+    <div class="mc"><div class="ml">Осталось</div><div class="mv" style="color:var(--orange)" id="wm-left">+11.15 кг</div></div>
+    <div class="mc"><div class="ml">Прирост/нед</div><div class="mv" style="color:#34d399">+0.8 кг</div></div>
+  </div>
+
+  <!-- Прогресс-бар цели -->
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>
+        <div style="font-size:14px;font-weight:500" id="wg-title">Набор массы: 68.85 → 80 кг</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px" id="wg-forecast">Прогноз: октябрь 2026 при +0.8 кг/нед</div>
+      </div>
+      <span id="wg-pct-badge" class="badge" style="background:#14532d33;color:#4ade80;font-size:14px;font-weight:700">86%</span>
+    </div>
+    <div style="height:14px;background:var(--bg3);border-radius:7px;overflow:hidden;border:1px solid var(--border);position:relative">
+      <div id="wg-bar" style="height:100%;width:86%;background:linear-gradient(90deg,#34d399,#4ade80);border-radius:7px;transition:width .4s"></div>
+      <div id="wg-bar-label" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:9px;color:rgba(255,255,255,0.5)">осталось 11.15 кг</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:5px">
+      <span id="wg-start-label">Старт: 60 кг</span>
+      <span id="wg-end-label">Цель: 80 кг</span>
+    </div>
+  </div>
+
+  <!-- График и тренировки -->
+  <div class="g2">
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">График веса</div>
+      <div style="position:relative;height:200px"><canvas id="w-chart"></canvas></div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Тренировки — июнь</div>
+      <div class="row"><span>Зал</span><span class="badge" style="background:#14532d33;color:#4ade80">0 / 0</span></div>
+      <div class="row"><span>Йога</span><span class="badge" style="background:#0f3d3033;color:#34d399">0 / 0</span></div>
+      <div class="row"><span>Прогулки</span><span class="badge" style="background:#2e1065aa;color:#a78bfa">0</span></div>
+      <div class="row"><span>Серия (зал)</span><span class="badge" style="background:var(--orange-bg);color:var(--orange-tc)">0 дней</span></div>
+      <div style="margin-top:12px;padding:12px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--text2)">Прогноз достижения цели</div>
+        <div style="font-size:17px;font-weight:600;margin-top:3px" id="wg-forecast-big">Считается...</div>
+        <div style="font-size:11px;color:var(--text3)" id="wg-forecast-sub">при темпе +0.8 кг/нед · осталось ~14 нед</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ЧЕКАПЫ -->
+  <div class="card" style="margin-top:14px;margin-bottom:0;border-color:rgba(96,165,250,0.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin-bottom:0">🩺 Чекапы здоровья</div>
+      <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openCheckupEditor(null)"><i class="ti ti-plus"></i> Добавить</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px;background:rgba(96,165,250,0.08);border-radius:6px;padding:8px;border:1px solid rgba(96,165,250,0.15)">
+      💡 Рекомендуется делать раз в 6 месяцев: общий анализ крови, биохимия, гормоны, УЗИ органов, давление, зрение, стоматолог.
+    </div>
+
+    <!-- Форма чекапа -->
+    <div id="checkup-editor" class="form-hidden" style="margin-bottom:12px">
+      <input type="hidden" id="cu-idx" value="-1">
+      <div class="frow">
+        <input type="text" placeholder="Название (Анализ крови, УЗИ...)" id="cu-name">
+        <input type="date" id="cu-last" placeholder="Дата последнего">
+      </div>
+      <div class="frow">
+        <select id="cu-freq">
+          <option value="3">Раз в 3 месяца</option>
+          <option value="6" selected>Раз в 6 месяцев</option>
+          <option value="12">Раз в год</option>
+          <option value="24">Раз в 2 года</option>
+        </select>
+        <input type="text" placeholder="Заметка (клиника, врач...)" id="cu-note">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" style="font-size:12px" onclick="saveCheckup()">Сохранить</button>
+        <button class="btn" style="font-size:12px" onclick="tf('checkup-editor')">Отмена</button>
+        <button class="btn" id="cu-del" style="display:none;font-size:12px;color:#f87171;border-color:rgba(248,113,113,0.3)" onclick="deleteCheckup()">Удалить</button>
+      </div>
+    </div>
+
+    <div id="checkup-list"></div>
+  </div>
+
+</div>
+
+<!-- BUSINESS -->
+<div id="page-business" class="page">
+  <div class="ph">
+    <div class="pt">Бизнес — Кроссовки</div>
+    <button class="btn btn-p" onclick="tf('biz-form')"><i class="ti ti-plus"></i> Операция</button>
+  </div>
+  <div id="biz-form" class="form-hidden">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn" id="biz-type-buy" onclick="setBizType('buy')" style="background:#450a0a33;color:#f87171">📦 Закупка</button>
+      <button class="btn" id="biz-type-sell" onclick="setBizType('sell')">💰 Продажа</button>
+    </div>
+    <div class="frow"><input type="text" placeholder="Товар (Nike Air Max 90...)" id="biz-item"><input type="number" placeholder="Кол-во, шт" id="biz-qty"></div>
+    <div class="frow"><input type="number" placeholder="Цена закупки ₽" id="biz-buy-price"><input type="number" placeholder="Цена продажи ₽" id="biz-sell-price"></div>
+    <div class="frow"><input type="date" id="biz-date"><input type="text" placeholder="Комментарий" id="biz-note"></div>
+    <button class="btn btn-p" onclick="addBizOp()">Сохранить</button>
+  </div>
+  <div class="g4">
+    <div class="mc"><div class="ml">Оборот (мес)</div><div class="mv">₽0</div></div>
+    <div class="mc"><div class="ml">Чистая прибыль</div><div class="mv" style="color:#4ade80">₽0</div></div>
+    <div class="mc"><div class="ml">ROI</div><div class="mv" style="color:var(--orange)">0%</div></div>
+    <div class="mc"><div class="ml">Остаток</div><div class="mv">0 пар</div></div>
+  </div>
+  <div class="g2" style="margin-bottom:14px">
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Товары в наличии</div>
+      <div class="row"><div><div style="font-weight:500">Nike Air Max 90</div><div style="font-size:11px;color:var(--text3)">Закуп ₽3 500 · Продажа ₽6 500</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge" style="background:#14532d33;color:#4ade80">8 пар · ROI 85%</span><span style="font-weight:600;color:#4ade80">+₽24к</span></div></div>
+      <div class="row"><div><div style="font-weight:500">Adidas Yeezy 350</div><div style="font-size:11px;color:var(--text3)">Закуп ₽5 200 · Продажа ₽9 000</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge" style="background:#451a0333;color:#fb923c">5 пар · ROI 73%</span><span style="font-weight:600;color:#4ade80">+₽19к</span></div></div>
+      <div class="row"><div><div style="font-weight:500">Jordan 1 Retro</div><div style="font-size:11px;color:var(--text3)">Закуп ₽4 800 · Продажа ₽8 200</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge" style="background:#2e1065aa;color:#a78bfa">10 пар · ROI 70%</span><span style="font-weight:600;color:#4ade80">+₽34к</span></div></div>
+    </div>
+    <!-- Лог операций -->
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">📋 История операций</div>
+      <div id="biz-log">
+        <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">История операций появится здесь 📦</div>
+        <div class="row"><div><div style="font-size:13px">Продажа Jordan 1 Retro × 1</div><div style="font-size:11px;color:var(--text3)">21 июн · 1 пара</div></div><span style="font-weight:600;color:#4ade80">+₽8 200</span></div>
+        <div class="row"><div><div style="font-size:13px">Закупка Jordan 1 Retro × 10</div><div style="font-size:11px;color:var(--text3)">18 июн · 10 пар</div></div><span style="font-weight:600;color:#f87171">-₽48 000</span></div>
+        <div class="row"><div><div style="font-size:13px">Продажа Adidas Yeezy × 2</div><div style="font-size:11px;color:var(--text3)">15 июн · 2 пары</div></div><span style="font-weight:600;color:#4ade80">+₽18 000</span></div>
+        <div class="row"><div><div style="font-size:13px">Закупка Nike Air Max × 8</div><div style="font-size:11px;color:var(--text3)">10 июн · 8 пар</div></div><span style="font-weight:600;color:#f87171">-₽28 000</span></div>
+      </div>
+    </div>
+  </div>
+  <!-- Круговые графики -->
+  <div class="g2">
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Оборот по товарам</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div style="position:relative;width:150px;height:150px;flex-shrink:0">
+          <canvas id="biz-revenue-donut"></canvas>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+            <div style="font-size:17px;font-weight:700;color:#4ade80">₽87к</div>
+            <div style="font-size:10px;color:var(--text3)">оборот</div>
+          </div>
+        </div>
+        <div style="flex:1" id="biz-revenue-legend"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="ct">Прибыль по товарам</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div style="position:relative;width:150px;height:150px;flex-shrink:0">
+          <canvas id="biz-profit-donut"></canvas>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+            <div style="font-size:17px;font-weight:700;color:#E8500A">₽34к</div>
+            <div style="font-size:10px;color:var(--text3)">прибыль</div>
+          </div>
+        </div>
+        <div style="flex:1" id="biz-profit-legend"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AI -->
+<div id="page-ai" class="page">
+  <div class="ph">
+    <div class="pt">AI-ассистент</div>
+    <button class="btn" onclick="genWeeklySummary()" id="ai-summary-btn"><i class="ti ti-refresh"></i> Обновить сводку</button>
+  </div>
+
+  <!-- Автосводка -->
+  <div class="card" style="margin-bottom:14px;border-color:rgba(96,165,250,0.2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="ct" style="margin-bottom:0">📊 Недельная сводка</div>
+      <span style="font-size:10px;color:var(--text3)" id="ai-summary-date"></span>
+    </div>
+    <div id="ai-weekly-summary">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div style="background:#14532d22;border:1px solid #14532d55;border-radius:8px;padding:10px">
+          <div style="font-size:11px;font-weight:600;color:#4ade80;margin-bottom:6px">🟢 Сильные стороны</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">45 дней без сигарет<br>90% тренировок<br>Прибыль +12%</div>
+        </div>
+        <div style="background:#451a0322;border:1px solid #451a0355;border-radius:8px;padding:10px">
+          <div style="font-size:11px;font-weight:600;color:#fb923c;margin-bottom:6px">🟡 Зоны роста</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">Сон: только 3/7<br>Еда +34% нормы<br>2 задачи зависли</div>
+        </div>
+        <div style="background:#1e3a5f22;border:1px solid #1e3a5f55;border-radius:8px;padding:10px">
+          <div style="font-size:11px;font-weight:600;color:#60a5fa;margin-bottom:6px">🎯 Фокус недели</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">Оплатить квартиру<br>Сон до 23:00<br>+2 тренировки</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Быстрые запросы -->
+  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+    <button class="btn" style="font-size:12px" onclick="sq('Сделай полный недельный отчёт по финансам, привычкам и прогрессу')">📊 Недельный отчёт</button>
+    <button class="btn" style="font-size:12px" onclick="sq('Проанализируй мои привычки и дай рекомендации')">💪 Привычки</button>
+    <button class="btn" style="font-size:12px" onclick="sq('Помоги распланировать завтрашний день по приоритетам')">📅 План дня</button>
+    <button class="btn" style="font-size:12px" onclick="sq('Как ускорить набор веса до 80 кг?')">⚖️ Вес</button>
+    <button class="btn" style="font-size:12px" onclick="sq('Дай анализ бизнеса SANS LAB: что улучшить?')">🦁 Бизнес</button>
+    <button class="btn" style="font-size:12px" onclick="sq('Сделай месячный отчёт по всем сферам жизни')">📋 Месяц</button>
+  </div>
+
+  <!-- Чат -->
+  <div class="card">
+    <div class="chat-box" id="ai-chat">
+      <div class="ai-msg ai-a">👋 Привет! Я твой персональный AI в Life OS. Знаю твои финансы, привычки, бизнес SANS LAB, цели и прогресс. Задавай любой вопрос.</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input class="ci" id="ai-in" placeholder="Напиши что угодно..." onkeydown="if(event.key==='Enter')sendAI()">
+      <button class="btn btn-p" onclick="sendAI()"><i class="ti ti-send"></i></button>
+    </div>
+  </div>
+</div>
+
+<!-- NOTES -->
+<div id="page-notes" class="page">
+  <div class="ph">
+    <div class="pt">Идеи и заметки</div>
+    <button class="btn btn-p" onclick="tf('note-form')"><i class="ti ti-plus"></i> Идея</button>
+  </div>
+  <div id="note-form" class="form-hidden">
+    <input class="fi" type="text" placeholder="Название идеи" id="n-title">
+    <textarea class="fi" id="n-text" placeholder="Опиши идею подробнее..." style="height:80px;resize:none"></textarea>
+    <div style="display:flex;gap:8px">
+      <select class="fi" id="n-type" style="margin-bottom:0;flex:1"><option>💡 Идея</option><option>💭 Мысль</option><option>💎 Инсайт</option><option>🎯 Вывод</option></select>
+      <button class="btn btn-p" onclick="addNote()">Сохранить</button>
+    </div>
+  </div>
+  <div class="g2" id="notes-grid">
+    <div style="font-size:13px;color:var(--text3);text-align:center;padding:24px 0">Идеи появятся здесь после добавления 💡</div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+// DATE
+const dtEl=document.getElementById('dt');if(dtEl)dtEl.textContent='Предприниматель · Новичок · SANS LAB · '+new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
+
+var wC=null,ftType='inc';
+
+// NAVIGATION
+function go(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>{
+    if(n.getAttribute('onclick')&&n.getAttribute('onclick').includes("'"+id+"'"))n.classList.add('active');
+  });
+  if(id==='finance'){initFinChart();renderFixed();}
+  if(id==='ai'){
+    document.getElementById('ai-summary-date').textContent=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+    genWeeklySummary();
+  }
+  if(id==='health'){initWChart();renderWeightGoal();renderCheckups();}
+  if(id==='business')initBizChart();
+  if(id==='character'){initChar();initCharTL();}
+  if(id==='habits')initHabits();
+}
+
+function tf(id){
+  const f=document.getElementById(id);
+  f.className=f.className==='form-hidden'?'form-show':'form-hidden';
+}
+
+function tog(el){
+  el.classList.toggle('done');
+  const t=el.nextElementSibling;
+  if(t&&t.tagName==='SPAN'){
+    t.style.textDecoration=el.classList.contains('done')?'line-through':'';
+    t.style.color=el.classList.contains('done')?'var(--text3)':'';
+  }
+}
+
+// LION SVG
+function lionSVG(){
+  const c='#E8500A',bg='#FAECE7';
+  return `
+  <path d="M110,14 Q132,24 150,14 Q142,36 160,44 Q136,44 138,60 Q110,48 82,60 Q84,44 60,44 Q78,36 70,14 Q88,24 110,14Z" fill="${c}"/>
+  <path d="M110,22 Q126,28 138,22 Q132,38 144,44 Q128,44 130,56 Q110,46 90,56 Q92,44 76,44 Q88,38 82,22 Q94,28 110,22Z" fill="${bg}" opacity=".28"/>
+  <circle cx="110" cy="108" r="100" fill="${bg}" stroke="${c}" stroke-width="3"/>
+  <path d="M110,26 Q130,16 148,24 Q140,40 152,50 Q134,48 130,66Z" fill="${c}"/>
+  <path d="M110,26 Q90,16 72,24 Q80,40 68,50 Q86,48 90,66Z" fill="${c}"/>
+  <path d="M60,50 Q44,54 38,70 Q54,66 60,80Z" fill="${c}" opacity=".9"/>
+  <path d="M160,50 Q176,54 182,70 Q166,66 160,80Z" fill="${c}" opacity=".9"/>
+  <path d="M50,90 Q34,94 32,112 Q48,106 54,118Z" fill="${c}" opacity=".85"/>
+  <path d="M170,90 Q186,94 188,112 Q172,106 166,118Z" fill="${c}" opacity=".85"/>
+  <circle cx="110" cy="104" r="60" fill="${c}" opacity=".2"/>
+  <circle cx="110" cy="104" r="47" fill="${c}" opacity=".34"/>
+  <circle cx="76" cy="82" r="20" fill="${c}" opacity=".85"/>
+  <circle cx="144" cy="82" r="20" fill="${c}" opacity=".85"/>
+  <circle cx="110" cy="108" r="40" fill="${bg}"/>
+  <path d="M92,90 Q97,82 102,90" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M118,90 Q123,82 128,90" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>
+  <ellipse cx="94" cy="102" rx="12" ry="13" fill="${c}"/>
+  <ellipse cx="126" cy="102" rx="12" ry="13" fill="${c}"/>
+  <ellipse cx="94" cy="101" rx="9" ry="10" fill="${bg}"/>
+  <ellipse cx="126" cy="101" rx="9" ry="10" fill="${bg}"/>
+  <circle cx="95" cy="102" r="5" fill="${c}"/>
+  <circle cx="127" cy="102" r="5" fill="${c}"/>
+  <ellipse cx="110" cy="116" rx="10" ry="7" fill="${c}"/>
+  <ellipse cx="110" cy="128" rx="20" ry="12" fill="${c}" opacity=".8"/>
+  <path d="M91,136 Q110,152 129,136" fill="none" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="84" y1="116" x2="62" y2="108" stroke="${c}" stroke-width="1.5"/>
+  <line x1="84" y1="122" x2="62" y2="122" stroke="${c}" stroke-width="1.5"/>
+  <line x1="84" y1="128" x2="64" y2="136" stroke="${c}" stroke-width="1.5"/>
+  <line x1="136" y1="116" x2="158" y2="108" stroke="${c}" stroke-width="1.5"/>
+  <line x1="136" y1="122" x2="158" y2="122" stroke="${c}" stroke-width="1.5"/>
+  <line x1="136" y1="128" x2="156" y2="136" stroke="${c}" stroke-width="1.5"/>
+  <ellipse cx="62" cy="152" rx="26" ry="22" fill="${c}"/>
+  <ellipse cx="158" cy="152" rx="26" ry="22" fill="${c}"/>
+  <ellipse cx="52" cy="144" rx="8" ry="7" fill="${bg}" opacity=".3"/>
+  <ellipse cx="70" cy="142" rx="8" ry="7" fill="${bg}" opacity=".3"/>
+  <ellipse cx="148" cy="144" rx="8" ry="7" fill="${bg}" opacity=".3"/>
+  <ellipse cx="166" cy="142" rx="8" ry="7" fill="${bg}" opacity=".3"/>
+  <rect x="74" y="174" width="72" height="22" rx="6" fill="${c}"/>
+  <text x="110" y="189" text-anchor="middle" font-size="11" font-weight="700" fill="${bg}" font-family="sans-serif">SANS LAB</text>`;
+}
+
+// Init lion everywhere
+['nav-lion','av-small','char-av'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el) el.innerHTML=lionSVG();
+});
+
+// CHARACTER
+function initChar(){
+  const stats=[
+    {n:'Финансы',i:'💰',c:'#4ade80',v:72},{n:'Дисциплина',i:'⚡',c:'#E8500A',v:85},
+    {n:'Здоровье',i:'💪',c:'#34d399',v:68},{n:'Сон',i:'😴',c:'#fb923c',v:55},
+    {n:'Тело',i:'🏋️',c:'#f87171',v:60},{n:'Бизнес',i:'🦁',c:'#E8500A',v:78},
+    {n:'Саморазвитие',i:'📚',c:'#a78bfa',v:82},{n:'Ментальное',i:'🧠',c:'#34d399',v:74},
+    {n:'Стиль',i:'👔',c:'#fb923c',v:65},{n:'Социальное',i:'🤝',c:'#f87171',v:58}
+  ];
+  document.getElementById('char-stats').innerHTML=stats.map(s=>
+    `<div class="srow"><span style="font-size:14px;width:20px">${s.i}</span><span class="sname">${s.n}</span><div class="sbar"><div class="sfill" style="width:${s.v}%;background:${s.c}"></div></div><span class="sval" style="color:${s.c}">${s.v}</span></div>`
+  ).join('');
+
+  const dq=[
+    {n:'Тренировка',x:'+50 XP',d:true},{n:'Чтение 20+ стр',x:'+40 XP',d:true},
+    {n:'Записать расходы',x:'+30 XP',d:true},{n:'Сон до полуночи',x:'+35 XP',d:false},
+    {n:'Прогулка 30 мин',x:'+25 XP',d:true},{n:'Без сигарет',x:'+100 XP',d:true},
+    {n:'Уход за кожей',x:'+20 XP',d:false},{n:'Закрыть 3 задачи',x:'+60 XP',d:false}
+  ];
+  const wq=[
+    {n:'5 тренировок за неделю',x:'+300 XP',d:false},{n:'Доход > ₽15 000',x:'+500 XP',d:true},
+    {n:'Без сигарет всю неделю',x:'+700 XP',d:true},{n:'Прочитать книгу',x:'+400 XP',d:false},
+    {n:'Обновить все цели',x:'+200 XP',d:true},{n:'Новая продажа',x:'+350 XP',d:true},
+    {n:'Серия 7 дней привычек',x:'+600 XP',d:false},{n:'Сохранить ₽20 000+',x:'+450 XP',d:false}
+  ];
+  function qHtml(arr){
+    return arr.map((q,i)=>`
+      <div style="display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="width:18px;height:18px;border-radius:50%;border:1.5px solid ${q.d?'#E8500A':'var(--border2)'};background:${q.d?'#E8500A':''};display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;cursor:pointer" onclick="var c=this.style.background;this.style.background=c?'':'#E8500A';this.style.borderColor=c?'var(--border2)':'#E8500A'">
+          ${q.d?'<svg width="10" height="10" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>':''}
+        </div>
+        <div><div style="font-size:13px">${q.n}</div><div style="font-size:11px;color:var(--text3)">${q.x}</div></div>
+      </div>`).join('');
+  }
+  document.getElementById('char-daily').innerHTML=qHtml(dq);
+  document.getElementById('char-weekly').innerHTML=qHtml(wq);
+}
+
+function initCharTL(){
+  const steps=[
+    {l:'Львёнок',min:1,max:5,c:'#888780',bg:'#2a2a2a'},
+    {l:'Детёныш',min:6,max:10,c:'#4ade80',bg:'#14532d33'},
+    {l:'Молодой',min:11,max:16,c:'#60a5fa',bg:'#1e3a5f33'},
+    {l:'Охотник',min:17,max:23,c:'#fb923c',bg:'#451a0333'},
+    {l:'Ветеран',min:24,max:31,c:'#E8500A',bg:'var(--orange-bg)'},
+    {l:'Альфа',min:32,max:39,c:'#a78bfa',bg:'#2e1065aa'},
+    {l:'Легенда',min:40,max:47,c:'#f472b6',bg:'#500724aa'},
+    {l:'Prime',min:48,max:50,c:'#34d399',bg:'#0f3d3033'}
+  ];
+  const cur=12;
+  document.getElementById('char-tl').innerHTML=steps.map(s=>{
+    const active=cur>=s.min&&cur<=s.max,past=cur>s.max;
+    return `<div class="ts${active?' active':''}" title="${s.l} (${s.min}–${s.max})">
+      <div class="td" style="background:${active?s.c:past?s.bg:'var(--bg3)'};border-color:${active||past?s.c:'var(--border)'};color:${active?'#fff':past?s.c:'var(--text3)'}">
+        ${past?'✓':s.min}
+      </div>
+      <div class="tlab" style="color:${active?s.c:'var(--text3)'};font-weight:${active?600:400}">${s.l}</div>
+    </div>`;
+  }).join('');
+}
+
+// HABITS
+var habitsData=[
+  {n:'💪 Зал',s:0,target:3,d:[0,0,0,0,0,0,0]},
+  {n:'🧘 Йога',s:0,target:3,d:[0,0,0,0,0,0,0]},
+  {n:'📚 Чтение',s:0,target:7,d:[0,0,0,0,0,0,0]},
+  {n:'🌙 Сон до полуночи',s:0,target:5,d:[0,0,0,0,0,0,0]},
+  {n:'🚭 Без сигарет',s:0,target:7,d:[0,0,0,0,0,0,0]},
+  {n:'🚶 Прогулки',s:0,target:4,d:[0,0,0,0,0,0,0]},
+  {n:'💸 Контроль расходов',s:0,target:5,d:[0,0,0,0,0,0,0]},
+  {n:'🧴 Уход за кожей',s:0,target:3,d:[0,0,0,0,0,0,0]}
+];
+
+function toggleHabitDot(hi,di){
+  const newVal = habitsData[hi].d[di] ? 0 : 1;
+  habitsData[hi].d[di]=newVal;
+  renderHabits();
+  renderHabitsStats();
+  // Сохраняем в базу. Дата = понедельник этой недели + смещение дня
+  try{
+    const now=new Date();
+    const monday=new Date(now);
+    const dow=(now.getDay()+6)%7; // 0=Пн
+    monday.setDate(now.getDate()-dow);
+    const d=new Date(monday); d.setDate(monday.getDate()+di);
+    const dateStr=d.toISOString().slice(0,10);
+    const habitName=habitsData[hi].n.replace(/[^\wа-яА-ЯёЁ ]/g,'').trim();
+    if(newVal){
+      sbPost('habits_log', {habit:habitName, date:dateStr}).catch(e=>console.warn('habit save',e));
+    } else {
+      // снять отметку — удаляем запись за этот день
+      fetch(`${SB_URL}/rest/v1/habits_log?habit=eq.${encodeURIComponent(habitName)}&date=eq.${dateStr}`,{method:'DELETE',headers:SB_H}).catch(e=>console.warn('habit del',e));
+    }
+  }catch(e){console.warn('habit toggle error',e);}
+}
+
+function showHabitEditor(idx){
+  const ed=document.getElementById('habit-editor');
+  const delBtn=document.getElementById('he-delete');
+  ed.className='form-show';
+  if(idx===null){
+    document.getElementById('habit-editor-title').textContent='Новая привычка';
+    document.getElementById('he-idx').value='-1';
+    document.getElementById('he-name').value='';
+    document.getElementById('he-target').value='3';
+    delBtn.style.display='none';
+  } else {
+    const h=habitsData[idx];
+    document.getElementById('habit-editor-title').textContent='Редактировать привычку';
+    document.getElementById('he-idx').value=idx;
+    document.getElementById('he-name').value=h.n;
+    document.getElementById('he-target').value=h.target;
+    delBtn.style.display='inline-flex';
+  }
+}
+
+function saveHabit(){
+  const idx=parseInt(document.getElementById('he-idx').value);
+  const name=document.getElementById('he-name').value.trim();
+  const target=parseInt(document.getElementById('he-target').value);
+  if(!name)return;
+  if(idx===-1){
+    habitsData.push({n:name,s:0,target:target,d:[0,0,0,0,0,0,0]});
+  } else {
+    habitsData[idx].n=name;
+    habitsData[idx].target=target;
+  }
+  tf('habit-editor');
+  renderHabits();
+  renderHabitsStats();
+}
+
+function deleteHabit(){
+  const idx=parseInt(document.getElementById('he-idx').value);
+  if(idx>=0) habitsData.splice(idx,1);
+  tf('habit-editor');
+  renderHabits();
+  renderHabitsStats();
+}
+
+function renderHabitsStats(){
+  const el=document.getElementById('habits-stats');
+  if(!el)return;
+  const totalDone=habitsData.reduce((a,h)=>a+h.d.filter(Boolean).length,0);
+  const totalTarget=habitsData.reduce((a,h)=>a+h.target,0);
+  const bestStreak=Math.max(...habitsData.map(h=>h.s));
+  const avgPct=habitsData.length?Math.round(habitsData.reduce((a,h)=>{
+    const pct=Math.min(100,Math.round(h.d.filter(Boolean).length/h.target*100));
+    return a+pct;
+  },0)/habitsData.length):0;
+  el.innerHTML=`
+    <div class="mc" style="margin-bottom:0;min-width:110px"><div class="ml">Выполнено</div><div class="mv">${totalDone} / ${totalTarget}</div></div>
+    <div class="mc" style="margin-bottom:0;min-width:110px"><div class="ml">Лучшая серия</div><div class="mv">🔥 ${bestStreak} дн</div></div>
+    <div class="mc" style="margin-bottom:0;min-width:110px"><div class="ml">Средний %</div><div class="mv" style="color:${avgPct>=80?'#4ade80':avgPct>=50?'#fb923c':'#f87171'}">${avgPct}%</div></div>`;
+}
+
+function renderHabits(){
+  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  const track=document.getElementById('habits-track');
+  if(!track)return;
+
+  let html=`<div style="display:flex;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+    <div style="width:175px;font-size:10px;color:var(--text3)">Привычка</div>
+    <div style="flex:1;display:flex;justify-content:space-around">
+      ${days.map(d=>`<span style="font-size:10px;color:var(--text3);text-align:center;width:28px">${d}</span>`).join('')}
+    </div>
+    <div style="width:50px;font-size:10px;color:var(--text3);text-align:center">Цель</div>
+    <div style="width:50px;font-size:10px;color:var(--text3);text-align:center">Серия</div>
+    <div style="width:38px;font-size:10px;color:var(--text3);text-align:right">%</div>
+    <div style="width:28px"></div>
+  </div>`;
+
+  habitsData.forEach((h,hi)=>{
+    const done=h.d.filter(Boolean).length;
+    const pct=Math.min(100,Math.round(done/h.target*100));
+    const pctColor=pct>=100?'#4ade80':pct>=60?'#fb923c':'#f87171';
+    const streak=h.s;
+    html+=`<div style="display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div style="width:175px;font-size:13px">${h.n}</div>
+      <div style="flex:1;display:flex;justify-content:space-around">
+        ${h.d.map((v,di)=>`
+          <div onclick="toggleHabitDot(${hi},${di})"
+            title="${days[di]}: ${v?'выполнено':'не выполнено'}"
+            style="width:26px;height:26px;border-radius:50%;
+              background:${v?'#E8500A':'var(--bg3)'};
+              border:2px solid ${v?'#E8500A':'var(--border2)'};
+              cursor:pointer;transition:all .15s;
+              display:flex;align-items:center;justify-content:center;
+              font-size:11px;color:#fff;font-weight:700;
+              ${di===new Date().getDay()-1||(!v&&di===new Date().getDay()-1)?'box-shadow:0 0 0 2px rgba(232,80,10,0.4)':''}"
+          >${v?'✓':''}</div>`).join('')}
+      </div>
+      <div style="width:50px;text-align:center;font-size:11px;color:var(--text3)">${done}/${h.target}</div>
+      <div style="width:50px;text-align:center;font-size:12px;font-weight:600;color:${pctColor}">${streak>=7?'🔥':''} ${streak}д</div>
+      <div style="width:38px;text-align:right">
+        <span style="font-size:12px;font-weight:700;color:${pctColor}">${pct}%</span>
+      </div>
+      <div style="width:28px;text-align:right">
+        <span onclick="showHabitEditor(${hi})" style="cursor:pointer;font-size:14px;color:var(--text3);opacity:.5;user-select:none" title="Редактировать">✎</span>
+      </div>
+    </div>`;
+  });
+
+  track.innerHTML=html;
+}
+
+async function initHabits(){
+  // Подтягиваем отметки за текущую неделю из базы
+  try{
+    const now=new Date();
+    const dow=(now.getDay()+6)%7; // 0=Пн
+    const monday=new Date(now); monday.setDate(now.getDate()-dow);
+    const sunday=new Date(monday); sunday.setDate(monday.getDate()+6);
+    const from=monday.toISOString().slice(0,10);
+    const to=sunday.toISOString().slice(0,10);
+    const logs=await sbGet('habits_log', `date=gte.${from}&date=lte.${to}`);
+    // Сброс недели
+    habitsData.forEach(h=>h.d=[0,0,0,0,0,0,0]);
+    logs.forEach(l=>{
+      const ln=(l.habit||'').replace(/[^\wа-яА-ЯёЁ ]/g,'').trim().toLowerCase();
+      const idx=habitsData.findIndex(h=>h.n.replace(/[^\wа-яА-ЯёЁ ]/g,'').trim().toLowerCase()===ln);
+      if(idx>=0 && l.date){
+        const di=(new Date(l.date).getDay()+6)%7;
+        habitsData[idx].d[di]=1;
+      }
+    });
+  }catch(e){console.warn('initHabits load',e);}
+  renderHabits();
+  renderHabitsStats();
+}
+
+// FIXED EXPENSES
+var fixedExpenses=[
+  {icon:'🏠',name:'Квартира',amount:48500,day:28},
+  {icon:'💪',name:'Зал',amount:2500,day:1},
+  {icon:'🧘',name:'Йога',amount:6500,day:5},
+  {icon:'🐱',name:'Буся',amount:5000,day:10},
+  {icon:'📱',name:'Телефон',amount:700,day:15},
+];
+
+function renderFixed(){
+  const list=document.getElementById('fixed-list');
+  const totalEl=document.getElementById('fixed-total');
+  if(!list)return;
+  const today=new Date().getDate();
+  let total=0;
+  list.innerHTML=fixedExpenses.map((f,i)=>{
+    total+=f.amount;
+    const daysLeft=f.day>=today?f.day-today:30-(today-f.day);
+    const urgent=daysLeft<=5;
+    const paid=daysLeft>25;
+    return `<div class="row">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <span style="font-size:18px">${f.icon}</span>
+        <div>
+          <div style="font-size:13px">${f.name}</div>
+          <div style="font-size:10px;color:${urgent?'#f87171':paid?'#4ade80':'var(--text3)'}">${paid?'✓ Оплачено':urgent?`⚠ через ${daysLeft} дн`:`${daysLeft} дней`}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-weight:700;color:${urgent?'#f87171':'var(--text)'}">₽${f.amount.toLocaleString('ru')}</span>
+        <span onclick="openFixedEditor(${i})" style="cursor:pointer;font-size:13px;color:var(--text3);opacity:.5" title="Редактировать">✎</span>
+      </div>
+    </div>`;
+  }).join('');
+  if(totalEl) totalEl.textContent='₽'+total.toLocaleString('ru');
+}
+
+function openFixedEditor(idx){
+  const ed=document.getElementById('fixed-editor');
+  const del=document.getElementById('fe-del');
+  ed.className='form-show';
+  if(idx===null){
+    document.getElementById('fe-idx').value='-1';
+    document.getElementById('fe-name').value='';
+    document.getElementById('fe-amount').value='';
+    document.getElementById('fe-day').value='';
+    document.getElementById('fe-icon').value='🔁';
+    del.style.display='none';
+  } else {
+    const f=fixedExpenses[idx];
+    document.getElementById('fe-idx').value=idx;
+    document.getElementById('fe-name').value=f.name;
+    document.getElementById('fe-amount').value=f.amount;
+    document.getElementById('fe-day').value=f.day;
+    document.getElementById('fe-icon').value=f.icon;
+    del.style.display='inline-flex';
+  }
+}
+
+function saveFixed(){
+  const idx=parseInt(document.getElementById('fe-idx').value);
+  const name=document.getElementById('fe-name').value.trim();
+  const amount=parseInt(document.getElementById('fe-amount').value);
+  const day=parseInt(document.getElementById('fe-day').value)||1;
+  const icon=document.getElementById('fe-icon').value;
+  if(!name||!amount)return;
+  if(idx===-1){
+    fixedExpenses.push({icon,name,amount,day});
+  } else {
+    fixedExpenses[idx]={icon,name,amount,day};
+  }
+  tf('fixed-editor');
+  renderFixed();
+}
+
+function deleteFixed(){
+  const idx=parseInt(document.getElementById('fe-idx').value);
+  if(idx>=0) fixedExpenses.splice(idx,1);
+  tf('fixed-editor');
+  renderFixed();
+}
+
+// WEIGHT GOAL
+var weightData={current:68.85,goal:80,start:60,type:'gain',deadline:'2026-10-01'};
+
+function saveWeightGoal(){
+  weightData.goal=parseFloat(document.getElementById('wg-target').value)||80;
+  weightData.current=parseFloat(document.getElementById('wg-current').value)||69;
+  weightData.type=document.getElementById('wg-type').value;
+  weightData.deadline=document.getElementById('wg-deadline').value;
+  tf('goal-weight-form');
+  renderWeightGoal();
+}
+
+function saveWeight(){
+  const val=parseFloat(document.getElementById('w-val').value);
+  if(!val)return;
+  weightData.current=val;
+  document.getElementById('wm-current').textContent=val+' кг';
+  const left=Math.abs(weightData.goal-val).toFixed(1);
+  document.getElementById('wm-left').textContent=(weightData.type==='gain'?'+':'-')+left+' кг';
+  tf('w-form');
+  renderWeightGoal();
+}
+
+function renderWeightGoal(){
+  const c=weightData.current, g=weightData.goal, s=weightData.start;
+  const isGain=weightData.type==='gain';
+  const total=Math.abs(g-s);
+  const done=Math.abs(c-s);
+  const pct=total>0?Math.min(100,Math.round(done/total*100)):100;
+  const left=Math.abs(g-c).toFixed(1);
+  const weeksLeft=Math.ceil(left/0.8);
+  const forecast=new Date();
+  forecast.setDate(forecast.getDate()+weeksLeft*7);
+  const forecastStr=forecast.toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+
+  document.getElementById('wm-current').textContent=c+' кг';
+  document.getElementById('wm-goal').textContent=g+' кг';
+  document.getElementById('wm-left').textContent=(isGain?'+':'-')+left+' кг';
+  document.getElementById('wg-title').textContent=(isGain?'Набор массы':'Похудение')+': '+c+' → '+g+' кг';
+  document.getElementById('wg-forecast').textContent='Прогноз: '+forecastStr+' при '+(isGain?'+':'-')+'0.8 кг/нед';
+  document.getElementById('wg-pct-badge').textContent=pct+'%';
+  document.getElementById('wg-bar').style.width=pct+'%';
+  document.getElementById('wg-bar').style.background=isGain?'linear-gradient(90deg,#34d399,#4ade80)':'linear-gradient(90deg,#60a5fa,#a78bfa)';
+  document.getElementById('wg-bar-label').textContent='осталось '+left+' кг';
+  document.getElementById('wg-start-label').textContent='Старт: '+s+' кг';
+  document.getElementById('wg-end-label').textContent='Цель: '+g+' кг';
+  document.getElementById('wg-forecast-big').textContent=forecastStr;
+  document.getElementById('wg-forecast-sub').textContent='при темпе '+(isGain?'+':'-')+'0.8 кг/нед · осталось ~'+weeksLeft+' нед';
+
+  // prefill form
+  document.getElementById('wg-target').value=g;
+  document.getElementById('wg-current').value=c;
+  document.getElementById('wg-type').value=weightData.type;
+}
+
+// CHECKUPS
+var checkupsData=[
+  {name:'🩸 Анализ крови (общий)',last:'2024-11-15',freq:6,note:'Инвитро'},
+  {name:'🧪 Биохимия крови',last:'2024-11-15',freq:6,note:'Инвитро'},
+  {name:'🦷 Стоматолог',last:'2025-01-10',freq:6,note:''},
+  {name:'👁 Зрение',last:'2024-09-01',freq:12,note:''},
+  {name:'❤️ ЭКГ + давление',last:'2025-03-20',freq:12,note:''},
+  {name:'🔬 УЗИ органов',last:'2024-10-05',freq:12,note:''},
+];
+
+function renderCheckups(){
+  const el=document.getElementById('checkup-list');
+  if(!el)return;
+  const now=new Date();
+  el.innerHTML=checkupsData.map((c,i)=>{
+    const last=c.last?new Date(c.last):null;
+    const nextDate=last?new Date(last.getTime()+c.freq*30*24*3600*1000):null;
+    const daysLeft=nextDate?Math.round((nextDate-now)/(24*3600*1000)):null;
+    const overdue=daysLeft!==null&&daysLeft<0;
+    const soon=daysLeft!==null&&daysLeft>=0&&daysLeft<=30;
+    const ok=daysLeft!==null&&daysLeft>30;
+    const statusColor=overdue?'#f87171':soon?'#fb923c':'#4ade80';
+    const statusText=overdue?`Просрочено на ${Math.abs(daysLeft)} дн!`:soon?`Через ${daysLeft} дн`:ok?`Через ${daysLeft} дн`:'Не запланировано';
+    const lastStr=last?last.toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'}):'Не проходил';
+    return `<div class="row">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px">${c.name}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">Последний: ${lastStr}${c.note?' · '+c.note:''} · раз в ${c.freq} мес</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+        <span style="font-size:11px;font-weight:600;color:${statusColor}">${overdue?'⚠ ':ok?'✓ ':'⏰ '}${statusText}</span>
+        <span onclick="openCheckupEditor(${i})" style="cursor:pointer;font-size:13px;color:var(--text3);opacity:.5" title="Редактировать">✎</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openCheckupEditor(idx){
+  const ed=document.getElementById('checkup-editor');
+  const del=document.getElementById('cu-del');
+  ed.className='form-show';
+  if(idx===null){
+    document.getElementById('cu-idx').value='-1';
+    document.getElementById('cu-name').value='';
+    document.getElementById('cu-last').value='';
+    document.getElementById('cu-freq').value='6';
+    document.getElementById('cu-note').value='';
+    del.style.display='none';
+  } else {
+    const c=checkupsData[idx];
+    document.getElementById('cu-idx').value=idx;
+    document.getElementById('cu-name').value=c.name;
+    document.getElementById('cu-last').value=c.last||'';
+    document.getElementById('cu-freq').value=c.freq;
+    document.getElementById('cu-note').value=c.note||'';
+    del.style.display='inline-flex';
+  }
+}
+
+function saveCheckup(){
+  const idx=parseInt(document.getElementById('cu-idx').value);
+  const name=document.getElementById('cu-name').value.trim();
+  const last=document.getElementById('cu-last').value;
+  const freq=parseInt(document.getElementById('cu-freq').value);
+  const note=document.getElementById('cu-note').value.trim();
+  if(!name)return;
+  if(idx===-1){
+    checkupsData.push({name,last,freq,note});
+  } else {
+    checkupsData[idx]={name,last,freq,note};
+  }
+  tf('checkup-editor');
+  renderCheckups();
+}
+
+function deleteCheckup(){
+  const idx=parseInt(document.getElementById('cu-idx').value);
+  if(idx>=0) checkupsData.splice(idx,1);
+  tf('checkup-editor');
+  renderCheckups();
+}
+
+// TASK FILTER
+function switchTaskFilter(tab){
+  ['today','week','month'].forEach(t=>{
+    document.getElementById('tf-panel-'+t).style.display=t===tab?'block':'none';
+    const btn=document.getElementById('tf-'+t);
+    btn.style.background=t===tab?'var(--orange)':'transparent';
+    btn.style.color=t===tab?'#fff':'var(--text2)';
+  });
+}
+
+function tog2(row){
+  const check=row.querySelector('.tcheck');
+  const text=row.querySelector('span:not(.badge)');
+  if(!check)return;
+  check.classList.toggle('done');
+  if(text){
+    text.style.textDecoration=check.classList.contains('done')?'line-through':'';
+    text.style.color=check.classList.contains('done')?'var(--text3)':'';
+  }
+}
+
+// BUSINESS OPS LOG
+var bizOpType='sell';
+function setBizType(t){
+  bizOpType=t;
+  document.getElementById('biz-type-buy').style.background=t==='buy'?'#450a0a33':'';
+  document.getElementById('biz-type-buy').style.color=t==='buy'?'#f87171':'';
+  document.getElementById('biz-type-sell').style.background=t==='sell'?'#14532d33':'';
+  document.getElementById('biz-type-sell').style.color=t==='sell'?'#4ade80':'';
+}
+function addBizOp(){
+  const item=document.getElementById('biz-item').value.trim();
+  const qty=document.getElementById('biz-qty').value||1;
+  const sellP=document.getElementById('biz-sell-price').value;
+  const buyP=document.getElementById('biz-buy-price').value;
+  if(!item)return;
+  const isSell=bizOpType==='sell';
+  const amount=isSell?sellP*qty:buyP*qty;
+  const today=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+  const row=`<div class="row"><div><div style="font-size:13px">${isSell?'Продажа':'Закупка'} ${item} × ${qty}</div><div style="font-size:11px;color:var(--text3)">${today} · ${qty} пар</div></div><span style="font-weight:600;color:${isSell?'#4ade80':'#f87171'}">${isSell?'+':'-'}₽${parseInt(amount).toLocaleString('ru')}</span></div>`;
+  document.getElementById('biz-log').insertAdjacentHTML('afterbegin',row);
+  ['biz-item','biz-qty','biz-buy-price','biz-sell-price','biz-note'].forEach(id=>document.getElementById(id).value='');
+  tf('biz-form');
+}
+
+// AI AUTO SUMMARY
+async function genWeeklySummary(){
+  const btn=document.getElementById('ai-summary-btn');
+  const el=document.getElementById('ai-weekly-summary');
+  btn.innerHTML='<i class="ti ti-loader"></i> Генерирую...';
+  btn.disabled=true;
+  document.getElementById('ai-summary-date').textContent='обновляется...';
+  try{
+    throw new Error('ai-web-disabled');
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      model:'claude-sonnet-4-6',max_tokens:600,
+      system:'Ты AI-ассистент в Life OS. Данные пользователя: вес 69кг (цель 80кг), баланс ₽84200, доход ₽62000/мес, расход ₽28400/мес, прибыль ₽33600. Привычки: зал 12дн подряд, без сигарет 45дн, чтение 21дн, сон до полуночи 3/7дн, еда расходы +34%. Бизнес SANS LAB: кроссовки, оборот ₽87000/мес, ROI 64%. Уровень 1, ранг Ветеран. Задачи: не оплачена квартира, 2 задачи зависли.',
+      messages:[{role:'user',content:'Сделай краткую недельную сводку в формате JSON: {"good":["пункт1","пункт2","пункт3"],"attention":["пункт1","пункт2","пункт3"],"focus":["пункт1","пункт2","пункт3"]}. Только JSON, без лишнего текста. Каждый пункт — максимум 5 слов.'}]
+    })});
+    const d=await r.json();
+    const raw=d.content?.[0]?.text||'{}';
+    const clean=raw.replace(/```json|```/g,'').trim();
+    const data=JSON.parse(clean);
+    el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div style="background:#14532d22;border:1px solid #14532d55;border-radius:8px;padding:10px">
+        <div style="font-size:11px;font-weight:600;color:#4ade80;margin-bottom:6px">🟢 Сильные стороны</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.8">${(data.good||[]).join('<br>')}</div>
+      </div>
+      <div style="background:#451a0322;border:1px solid #451a0355;border-radius:8px;padding:10px">
+        <div style="font-size:11px;font-weight:600;color:#fb923c;margin-bottom:6px">🟡 Зоны роста</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.8">${(data.attention||[]).join('<br>')}</div>
+      </div>
+      <div style="background:#1e3a5f22;border:1px solid #1e3a5f55;border-radius:8px;padding:10px">
+        <div style="font-size:11px;font-weight:600;color:#60a5fa;margin-bottom:6px">🎯 Фокус недели</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.8">${(data.focus||[]).join('<br>')}</div>
+      </div>
+    </div>`;
+    document.getElementById('ai-summary-date').textContent=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  }catch(e){
+    el.innerHTML='<div style="color:var(--text3);font-size:13px">🤖 AI-сводка доступна в Telegram-боте. На сайте генерация отключена в целях безопасности (нельзя хранить ключ на публичной странице).</div>';
+  }
+  btn.innerHTML='<i class="ti ti-refresh"></i> Обновить сводку';
+  btn.disabled=false;
+}
+
+// FORMS
+function setFT(t){
+  ftType=t;
+  document.getElementById('fi-inc').style.background=t==='inc'?'#14532d33':'';
+  document.getElementById('fi-inc').style.color=t==='inc'?'#4ade80':'';
+  document.getElementById('fi-exp').style.background=t==='exp'?'#450a0a33':'';
+  document.getElementById('fi-exp').style.color=t==='exp'?'#f87171':'';
+}
+async function addFin(){
+  const amt=document.getElementById('fi-amt').value;
+  const cat=document.getElementById('fi-cat').value;
+  const cmt=document.getElementById('fi-cmt').value||cat;
+  if(!amt)return;
+  const isInc=ftType==='inc';
+  await sbPost('finances', {
+    type: isInc?'income':'expense',
+    amount: parseFloat(amt),
+    category: cat||'Прочее',
+    comment: cmt,
+    date: new Date().toISOString()
+  }).catch(e=>console.warn('Ошибка сохранения:',e));
+  document.getElementById('fi-amt').value='';
+  document.getElementById('fi-cmt').value='';
+  tf('fin-form');
+  loadRealData(); // перечитать данные из базы
+}
+function addGoal(){
+  const name=document.getElementById('g-name').value;
+  const amt=document.getElementById('g-amt').value;
+  const cur=document.getElementById('g-cur').value||0;
+  if(!name||!amt)return;
+  const pct=Math.round(cur/amt*100);
+  document.getElementById('goals-list').insertAdjacentHTML('afterbegin',`<div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><div style="font-size:14px;font-weight:500">${name}</div></div><span class="badge" style="background:var(--orange-bg);color:var(--orange-tc)">${pct}%</span></div><div class="pbar"><div class="pfill" style="width:${pct}%;background:var(--orange)"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">₽${parseInt(cur).toLocaleString('ru')} из ₽${parseInt(amt).toLocaleString('ru')}</div></div>`);
+  tf('goal-form');
+}
+async function addTask(){
+  const name=document.getElementById('t-name').value;
+  const cat=document.getElementById('t-cat').value;
+  if(!name)return;
+  await sbPost('tasks', {
+    text: name,
+    status: 'todo',
+    priority: cat||'medium',
+    date: new Date().toISOString()
+  }).catch(e=>console.warn('Ошибка сохранения задачи:',e));
+  document.getElementById('t-name').value='';
+  tf('task-form');
+  loadRealData();
+}
+async function addNote(){
+  const title=document.getElementById('n-title').value;
+  const text=document.getElementById('n-text').value;
+  const type=document.getElementById('n-type').value;
+  if(!title)return;
+  await sbPost('notes', {
+    title: title,
+    text: text,
+    type: type||'idea',
+    date: new Date().toISOString()
+  }).catch(e=>console.warn('Ошибка сохранения идеи:',e));
+  document.getElementById('n-title').value='';
+  document.getElementById('n-text').value='';
+  tf('note-form');
+}
+
+// CHARTS
+var incDonut=null,expDonut=null;
+function initFinChart(){
+  if(incDonut)incDonut.destroy();
+  if(expDonut)expDonut.destroy();
+
+  const incData={labels:['Продажи','Работа','Бизнес','Прочее'],data:[17000,45000,5000,2000],colors:['#E8500A','#4ade80','#60a5fa','#a78bfa']};
+  const expData={labels:['Квартира','Еда','Одежда','Зал','Транспорт','Прочее'],data:[15000,5500,5500,2400,2200,2800],colors:['#f87171','#fb923c','#fbbf24','#34d399','#60a5fa','#a78bfa']};
+
+  const donutOpts=(data)=>({
+    type:'doughnut',
+    data:{labels:data.labels,datasets:[{data:data.data,backgroundColor:data.colors.map(c=>c+'cc'),borderColor:data.colors,borderWidth:2,hoverOffset:6}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' ₽'+ctx.parsed.toLocaleString('ru')}}}}
+  });
+
+  incDonut=new Chart(document.getElementById('inc-donut'),donutOpts(incData));
+  expDonut=new Chart(document.getElementById('exp-donut'),donutOpts(expData));
+
+  function makeLegend(id,data){
+    const total=data.data.reduce((a,b)=>a+b,0);
+    document.getElementById(id).innerHTML=data.labels.map((l,i)=>{
+      const pct=Math.round(data.data[i]/total*100);
+      return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
+        <div style="width:10px;height:10px;border-radius:3px;background:${data.colors[i]};flex-shrink:0"></div>
+        <div style="flex:1;font-size:12px;color:var(--text2)">${l}</div>
+        <div style="font-size:12px;font-weight:500;color:var(--text)">${pct}%</div>
+      </div>`;
+    }).join('');
+  }
+  makeLegend('inc-legend',incData);
+  makeLegend('exp-legend',expData);
+}
+function initWChart(){
+  if(wC)wC.destroy();
+  wC=new Chart(document.getElementById('w-chart'),{type:'line',data:{labels:['1','5','8','12','16','20','23'],datasets:[
+    {label:'Вес',data:[68.85,68.85,68.85,68.85,68.85,68.85,68.85],borderColor:'#E8500A',backgroundColor:'#E8500A22',fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:'#E8500A'},
+    {label:'Цель',data:[80,80,80,80,80,80,80],borderColor:'#4ade80',borderDash:[5,4],pointRadius:0,borderWidth:1.5}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#606060'}},y:{min:65,max:82,ticks:{color:'#606060',callback:v=>v+' кг'},grid:{color:'#ffffff08'}}}}});
+}
+var bizRevDonut=null,bizProfDonut=null;
+function initBizChart(){
+  if(bizRevDonut)bizRevDonut.destroy();
+  if(bizProfDonut)bizProfDonut.destroy();
+
+  const revData={
+    labels:['Nike Air Max 90','Adidas Yeezy 350','Jordan 1 Retro'],
+    data:[52000,45000,82000],
+    colors:['#4ade80','#60a5fa','#E8500A']
+  };
+  const profData={
+    labels:['Nike Air Max 90','Adidas Yeezy 350','Jordan 1 Retro'],
+    data:[24000,19000,34200],
+    colors:['#4ade80','#60a5fa','#E8500A']
+  };
+
+  const donutOpts=(data,symbol)=>({
+    type:'doughnut',
+    data:{labels:data.labels,datasets:[{data:data.data,backgroundColor:data.colors.map(c=>c+'cc'),borderColor:data.colors,borderWidth:2,hoverOffset:6}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' ₽'+ctx.parsed.toLocaleString('ru')}}}}
+  });
+
+  bizRevDonut=new Chart(document.getElementById('biz-revenue-donut'),donutOpts(revData));
+  bizProfDonut=new Chart(document.getElementById('biz-profit-donut'),donutOpts(profData));
+
+  function makeLegend(id,data){
+    const total=data.data.reduce((a,b)=>a+b,0);
+    document.getElementById(id).innerHTML=data.labels.map((l,i)=>{
+      const pct=Math.round(data.data[i]/total*100);
+      return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+        <div style="width:10px;height:10px;border-radius:3px;background:${data.colors[i]};flex-shrink:0"></div>
+        <div style="flex:1;font-size:12px;color:var(--text2)">${l}</div>
+        <div style="font-size:12px;font-weight:500;color:var(--text)">${pct}%</div>
+      </div>`;
+    }).join('');
+  }
+  makeLegend('biz-revenue-legend',revData);
+  makeLegend('biz-profit-legend',profData);
+}
+
+// AI
+async function sendAI(){
+  const inp=document.getElementById('ai-in');
+  const txt=inp.value.trim();
+  if(!txt)return;
+  inp.value='';
+  const chat=document.getElementById('ai-chat');
+  chat.insertAdjacentHTML('beforeend',`<div class="ai-msg ai-u">${txt}</div>`);
+  const load=document.createElement('div');
+  load.className='ai-msg ai-a';load.textContent='⏳ Думаю...';
+  chat.appendChild(load);chat.scrollTop=chat.scrollHeight;
+  try{
+    throw new Error('ai-web-disabled');
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,system:'Ты персональный AI-ассистент Life OS для Андреевича. Данные: вес 69кг (цель 80кг), баланс ₽84200, доход ₽62000/мес, расход ₽28400/мес, прибыль ₽33600. Привычки: зал 12дн подряд, без сигарет 45дн, чтение 21дн. Бизнес SANS LAB — кроссовки, оборот ₽87000/мес, ROI 64%. Уровень 1, ранг Ветеран. Отвечай кратко, по делу, на русском, с конкретными цифрами и рекомендациями.',messages:[{role:'user',content:txt}]})});
+    const d=await r.json();
+    load.textContent=d.content?.[0]?.text||'Ошибка.';
+  }catch(e){load.textContent='🤖 AI-чат работает в Telegram-боте — напиши вопрос туда. На сайте он отключён в целях безопасности.';}
+  chat.scrollTop=chat.scrollHeight;
+}
+function sq(t){document.getElementById('ai-in').value=t;sendAI();}
+
+// DASH HABITS STREAKS
+function initDashHabits(){
+  const habits=[
+    {i:'🚭',n:'Без сигарет',s:0,c:'#f87171',max:50},
+    {i:'📚',n:'Чтение',s:0,c:'#a78bfa',max:30},
+    {i:'💪',n:'Зал',s:0,c:'#E8500A',max:20},
+    {i:'🧘',n:'Йога',s:0,c:'#34d399',max:10},
+    {i:'🌙',n:'Сон до 00:00',s:0,c:'#60a5fa',max:7},
+    {i:'🚶',n:'Прогулки',s:0,c:'#4ade80',max:10},
+    {i:'💸',n:'Контроль трат',s:0,c:'#fb923c',max:10},
+  ];
+  const el=document.getElementById('dash-habits-streaks');
+  if(!el)return;
+  el.innerHTML=habits.map(h=>{
+    const pct=Math.round(h.s/h.max*100);
+    const fire=h.s>=7?'🔥 ':'';
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <span>${h.i} ${h.n}</span>
+        <span style="color:${h.c};font-weight:600">${fire}${h.s} дн</span>
+      </div>
+      <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+        <div style="width:${Math.min(pct,100)}%;height:100%;background:${h.c};border-radius:3px;transition:width .4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// XP LOG
+function initDashXP(){
+  const log=[
+    {a:'💪 Тренировка в зале',xp:80,c:'#f87171'},
+    {a:'🧘 Йога',xp:50,c:'#34d399'},
+    {a:'📚 Чтение',xp:40,c:'#a78bfa'},
+    {a:'💸 Записал расходы',xp:30,c:'#fb923c'},
+    {a:'🚭 День без сигарет',xp:100,c:'#E8500A'},
+    {a:'✅ Закрыл задачи',xp:40,c:'#4ade80'},
+  ];
+  const el=document.getElementById('dash-xp-log');
+  if(!el)return;
+  el.innerHTML=log.map(l=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:12px;color:var(--text2)">${l.a}</span>
+      <span style="font-size:12px;font-weight:700;color:${l.c}">+${l.xp} XP</span>
+    </div>`).join('');
+}
+
+// ACHIEVEMENTS
+function initDashAchievements(){
+  const ach=[
+    {i:'🚭',n:'45 дней без сигарет',c:'#f87171',bg:'rgba(248,113,113,0.1)'},
+    {i:'💪',n:'100 тренировок',c:'#E8500A',bg:'rgba(232,80,10,0.1)'},
+    {i:'📚',n:'21 день чтения',c:'#a78bfa',bg:'rgba(167,139,250,0.1)'},
+    {i:'💰',n:'Первые ₽100к',c:'#4ade80',bg:'rgba(74,222,128,0.1)'},
+  ];
+  const el=document.getElementById('dash-achievements');
+  if(!el)return;
+  el.innerHTML=ach.map(a=>`
+    <div style="background:${a.bg};border:1px solid ${a.c}33;border-radius:10px;padding:10px;text-align:center">
+      <div style="font-size:24px;margin-bottom:4px">${a.i}</div>
+      <div style="font-size:11px;color:${a.c};font-weight:500;line-height:1.3">${a.n}</div>
+    </div>`).join('');
+}
+
+// DASH TASKS TOGGLE WITH PROGRESS
+function togDash(row){
+  const check=row.querySelector('.tcheck');
+  const text=row.querySelector('span:not(.badge)');
+  check.classList.toggle('done');
+  if(check.classList.contains('done')){
+    if(text){text.style.textDecoration='line-through';text.style.color='var(--text3)';}
+  } else {
+    if(text){text.style.textDecoration='';text.style.color='';}
+  }
+  updateDayProgress();
+}
+function updateDayProgress(){
+  const all=document.querySelectorAll('#dash-tasks .tcheck');
+  const done=[...all].filter(c=>c.classList.contains('done')).length;
+  const pct=all.length?Math.round(done/all.length*100):0;
+  const bar=document.getElementById('day-pct-bar');
+  const lbl=document.getElementById('day-pct-label');
+  if(bar)bar.style.width=pct+'%';
+  if(lbl)lbl.textContent=pct+'%';
+}
+
+// SEASON GOALS
+var sgData = {
+  weightCur: 68.85, weightGoal: 80,
+  capitalCur: 0, capitalGoal: 1500000,
+  goal3Name: '✈ Япония', goal3Days: 127,
+  goal3MoneyGoal: 100000, goal3MoneySaved: 0
+};
+
+function addToGoal3(){
+  const amt = parseFloat(document.getElementById('sg-goal3-add-amount').value);
+  if(!amt || amt <= 0) return;
+  sgData.goal3MoneySaved += amt;
+  document.getElementById('sg-goal3-add-amount').value = '';
+  // Также добавить в финансы как отложенные
+  sbPost('finances', {
+    type: 'expense',
+    amount: amt,
+    category: sgData.goal3Name,
+    date: new Date().toISOString(),
+    comment: 'Копилка: ' + sgData.goal3Name
+  }).catch(()=>{});
+  renderSeasonGoals();
+  // Показать подтверждение
+  const btn = document.querySelector('[onclick="addToGoal3()"]');
+  if(btn){ btn.textContent='✓ Добавлено!'; setTimeout(()=>btn.textContent='+ Добавить', 1500); }
+}
+
+function saveSeasonGoals(){
+  sgData.weightCur    = parseFloat(document.getElementById('sg-weight-cur').value)       || sgData.weightCur;
+  sgData.weightGoal   = parseFloat(document.getElementById('sg-weight-goal').value)      || sgData.weightGoal;
+  sgData.capitalCur   = parseFloat(document.getElementById('sg-capital-cur').value)      || sgData.capitalCur;
+  sgData.capitalGoal  = parseFloat(document.getElementById('sg-capital-goal').value)     || sgData.capitalGoal;
+  sgData.goal3Name    = document.getElementById('sg-goal3-name').value                   || sgData.goal3Name;
+  sgData.goal3Days    = parseInt(document.getElementById('sg-goal3-days').value)         || sgData.goal3Days;
+  sgData.goal3MoneyGoal  = parseFloat(document.getElementById('sg-goal3-money-goal').value) || sgData.goal3MoneyGoal;
+  sgData.goal3MoneySaved = parseFloat(document.getElementById('sg-goal3-money-saved').value)|| sgData.goal3MoneySaved;
+  renderSeasonGoals();
+  tf('season-goals-editor');
+}
+
+function renderSeasonGoals(){
+  // безопасные хелперы — не падают, если элемента нет
+  const setT=(id,v)=>{const e=document.getElementById(id); if(e)e.textContent=v;};
+  const setH=(id,v)=>{const e=document.getElementById(id); if(e)e.innerHTML=v;};
+  const setW=(id,v)=>{const e=document.getElementById(id); if(e)e.style.width=v;};
+  const setV=(id,v)=>{const e=document.getElementById(id); if(e)e.value=v;};
+
+  // Вес
+  const wPct = Math.min(100, Math.round((sgData.weightCur / sgData.weightGoal) * 100));
+  const wLeft = Math.max(0, sgData.weightGoal - sgData.weightCur).toFixed(2);
+  const wWeeks = Math.ceil(wLeft / 0.8);
+  setT('sg-disp-weight-cur',  sgData.weightCur);
+  setT('sg-disp-weight-goal', sgData.weightGoal);
+  setT('sg-disp-weight-left', wLeft + ' кг');
+  setW('sg-bar-weight',       wPct + '%');
+  setT('sg-disp-weight-eta',  '~' + wWeeks + ' нед');
+
+  // Капитал
+  const cPct = Math.min(100, Math.round((sgData.capitalCur / sgData.capitalGoal) * 100));
+  const cLeft = sgData.capitalGoal - sgData.capitalCur;
+  const fmt = n => n >= 1000000 ? (n/1000000).toFixed(1)+'млн' : n >= 1000 ? Math.round(n/1000)+'к' : n;
+  setT('sg-disp-capital-cur',  fmt(sgData.capitalCur));
+  setT('sg-disp-capital-goal', fmt(sgData.capitalGoal));
+  setT('sg-disp-capital-left', '₽' + cLeft.toLocaleString('ru'));
+  setW('sg-bar-capital',       cPct + '%');
+  setT('sg-disp-capital-eta',  cPct + '% выполнено');
+
+  // Цель 3 — копилка
+  const g3Pct = sgData.goal3MoneyGoal > 0
+    ? Math.min(100, Math.round((sgData.goal3MoneySaved / sgData.goal3MoneyGoal) * 100))
+    : 0;
+  const g3Left = Math.max(0, sgData.goal3MoneyGoal - sgData.goal3MoneySaved);
+  setT('sg-disp-goal3-name',  sgData.goal3Name);
+  setT('sg-disp-goal3-saved', '₽' + sgData.goal3MoneySaved.toLocaleString('ru'));
+  setT('sg-disp-goal3-goal',  '₽' + sgData.goal3MoneyGoal.toLocaleString('ru'));
+  setT('sg-disp-goal3-days',  sgData.goal3Days);
+  setT('sg-disp-goal3-left',  '₽' + g3Left.toLocaleString('ru'));
+  setW('sg-bar-goal3',        g3Pct + '%');
+  setH('sg-disp-goal3-sub',   'Осталось: <b style="color:var(--text)">₽' + g3Left.toLocaleString('ru') + '</b>');
+
+  // Prefill форму
+  setV('sg-weight-cur',        sgData.weightCur);
+  setV('sg-weight-goal',       sgData.weightGoal);
+  setV('sg-capital-cur',       sgData.capitalCur);
+  setV('sg-capital-goal',      sgData.capitalGoal);
+  setV('sg-goal3-name',        sgData.goal3Name);
+  setV('sg-goal3-days',        sgData.goal3Days);
+  setV('sg-goal3-money-goal',  sgData.goal3MoneyGoal);
+  setV('sg-goal3-money-saved', sgData.goal3MoneySaved);
+}
+
+// STUB for removed timeline
+function initCharTL(){}
+
+// INIT
+function safeCall(fn){try{fn();}catch(e){console.warn('init error:',e);}}
+safeCall(initChar);
+safeCall(initDashHabits);
+safeCall(initDashXP);
+safeCall(initDashAchievements);
+safeCall(updateDayProgress);
+safeCall(renderFixed);
+safeCall(renderWeightGoal);
+safeCall(renderCheckups);
+safeCall(renderSeasonGoals);
+</script>
+</body>
+</html>
